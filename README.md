@@ -45,6 +45,12 @@ terraform output    # 아래 as-built 표에 해당하는 값이 나온다
 - **CloudWatch 로그 그룹 2개뿐, 둘 다 보존기간 없음(만료 없음)**. `/petclinic/*` 로 시작하는 그룹은 0개라 CloudWatch Agent 가 어느 인스턴스에서도 돌지 않습니다.
 - **RDS 파라미터 그룹은 기본값** — 커스텀 파라미터 그룹이 없습니다.
 - RDS 자격증명은 Secrets Manager 의 RDS 관리형 시크릿(`rds!db-…`)을 씁니다.
+- **WEB·배스천·web-ami 인스턴스에는 IAM 인스턴스 프로파일이 붙어 있지 않습니다** (빈 문자열). `was-test-iam` 이 붙은 `WAS-test-a` 만 예외입니다. → 이 인스턴스들은 SSM 관리 노드가 아니라서 CloudWatch Agent 를 SSM 으로 배포할 수 없고, 이것이 `/petclinic/*` 로그 그룹이 0개인 이유와 맞물립니다.
+- 계층별 배치: ASG `web-test` 와 `WEB-test-a` 는 web 서브넷(10.0.10.x·10.0.11.x), `WAS-test-a` 는 WAS 서브넷(10.0.20.235), `bas-server`(10.0.0.196)와 `web-ami`(10.0.0.133)는 **public 서브넷**에 있습니다.
+- 시작 템플릿 `web` 은 `default_version = 1`, `latest_version = 2` 입니다 — ASG 가 어느 버전을 쓰는지는 별도 확인이 필요합니다.
+- RDS: `mysql 8.0.44` · `db.t3.small` · `multi_az = true` · 200GB.
+
+> 위 값은 `terraform plan` 이 계정에서 실제로 data 소스를 읽어 확인한 것입니다 (2026-09-18). 플랜 결과는 "인프라 변경 없음, 출력값만 저장" 이었습니다.
 
 ## 범위  (이 레포에 없음)
 

@@ -20,9 +20,10 @@ output "load_balancers" {
   description = "ALB name -> DNS name, type, scheme"
   value = {
     for name, lb in data.aws_lb.named : name => {
-      dns_name = lb.dns_name
-      type     = lb.load_balancer_type
-      scheme   = lb.internal ? "internal" : "internet-facing"
+      dns_name    = lb.dns_name
+      type        = lb.load_balancer_type
+      scheme      = lb.internal ? "internal" : "internet-facing"
+      access_logs = try(lb.access_logs[0], null)
     }
   }
 }
@@ -34,7 +35,7 @@ output "target_groups" {
       arn               = tg.arn
       port              = tg.port
       protocol          = tg.protocol
-      health_check_path = tg.health_check_path
+      health_check_path = try(tg.health_check[0].path, null)
     }
   }
 }
