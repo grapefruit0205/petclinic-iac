@@ -46,7 +46,8 @@ output "asg_web" {
     min_size         = data.aws_autoscaling_group.web.min_size
     max_size         = data.aws_autoscaling_group.web.max_size
     desired_capacity = data.aws_autoscaling_group.web.desired_capacity
-    instance_ids     = [for i in data.aws_autoscaling_group.web.instances : i.instance_id]
+    instance_ids     = data.aws_instances.asg.ids
+    instance_ips     = data.aws_instances.asg.private_ips
     target_groups    = data.aws_autoscaling_group.web.target_group_arns
     subnets          = data.aws_autoscaling_group.web.vpc_zone_identifier
   }
@@ -91,7 +92,7 @@ output "iam" {
 output "rds_instance" {
   description = "RDS endpoint, engine, class and storage"
   value = {
-    identifier     = data.aws_db_instance.main.identifier
+    identifier     = data.aws_db_instance.main.db_instance_identifier
     endpoint       = data.aws_db_instance.main.endpoint
     engine         = data.aws_db_instance.main.engine
     engine_version = data.aws_db_instance.main.engine_version

@@ -55,6 +55,18 @@ data "aws_autoscaling_group" "web" {
   name = var.asg_name
 }
 
+# ASG 가 띄운 인스턴스 (aws_autoscaling_group 데이터 소스에는 instances 속성이 없다)
+data "aws_instances" "asg" {
+  filter {
+    name   = "tag:aws:autoscaling:groupName"
+    values = [var.asg_name]
+  }
+  filter {
+    name   = "instance-state-name"
+    values = ["running"]
+  }
+}
+
 data "aws_launch_template" "web" {
   name = var.launch_template_name
 }
