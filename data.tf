@@ -41,6 +41,8 @@ data "aws_route_table" "named" {
   route_table_id = each.value
 }
 
+# 주의: 이 엔드포인트는 사용자가 만든 것이 아니라 RDS Proxy(pet-proxy) 가 자동 생성한 AWS 관리 엔드포인트다
+# (서비스 owner amazon, ManagesVpcEndpoints=true, DB 서브넷 · petclinic-db-sg). 조회만 하고 import 대상에서는 뺐다.
 data "aws_vpc_endpoint" "main" {
   id = var.vpc_endpoint_id
 }
