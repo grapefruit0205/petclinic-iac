@@ -84,9 +84,9 @@ variable "launch_template_name" {
 }
 
 variable "instance_names" {
-  description = "Name tags of running standalone instances (ASG members are covered by the ASG lookup). WEB-test-a 는 2026-09-19 중지돼 조회 목록에서 뺐다 — resource 로는 compute.tf 에서 계속 소유한다"
+  description = "Name tags of running standalone instances (ASG members are covered by the ASG lookup). WEB-test-a · web-ami 는 2026-09-19 중지돼 조회 목록에서 뺐다 — resource 로는 compute.tf 에서 계속 소유한다"
   type        = list(string)
-  default     = ["WAS-test-a", "bas-server", "web-ami"]
+  default     = ["WAS-test-a", "bas-server"]
 }
 
 variable "security_group_names" {
