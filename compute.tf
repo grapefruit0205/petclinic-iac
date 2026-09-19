@@ -189,9 +189,15 @@ resource "aws_instance" "bastion" {
   tags = {
     Name = "bas-server"
   }
+
+  # web_ami 와 같은 이유 — 중지 시 퍼블릭 IP 해제로 replace 가 뜨는 것을 막는다.
+  lifecycle {
+    ignore_changes = [associate_public_ip_address]
+  }
 }
 
-# 골든 이미지 원본. 퍼블릭 서브넷에 퍼블릭 IP 로 계속 켜져 있다 (t2.medium, 상세 모니터링 on).
+# 골든 이미지 web-appache 의 원본 (9/15 CreateImage). 역할이 끝나 2026-09-19 22:35 KST 중지 — AMI 는 원본과 독립이라 영향 없음.
+# 다시 구울 일(OS·httpd 패키지 갱신)이 생기면 시작해서 쓰거나, 현재 AMI 로 새 인스턴스를 띄워 만든다. (t2.medium, 상세 모니터링 on)
 resource "aws_instance" "web_ami" {
   ami                         = "ami-010bbf6096e7bb791"
   instance_type               = "t2.medium"
@@ -213,6 +219,12 @@ resource "aws_instance" "web_ami" {
 
   tags = {
     Name = "web-ami"
+  }
+
+  # 자동 할당 퍼블릭 IP 는 중지하면 해제돼 provider 가 associate_public_ip_address 를 false 로 읽고,
+  # 이 인자는 ForceNew 라 plan 이 "must be replaced"(삭제 후 재생성) 를 내놓는다. 절대 그렇게 되면 안 되므로 무시한다.
+  lifecycle {
+    ignore_changes = [associate_public_ip_address]
   }
 }
 

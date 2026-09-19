@@ -107,14 +107,14 @@ Route53 24petclinic.mission-critical.site (A/AAAA alias)
   - `Targetgroup-web` 타깃 = ASG 2대뿐 (`WEB-test-a` 는 21:45 KST 등록 해제). `tg-internal-alb` 는 `WAS-test-a` 1대뿐 (SPOF).
 - **컴퓨트** — ASG `web-test` (min 2 · max 4 · desired 2, 시작 템플릿 `web` **v6 고정**, ELB 헬스체크, CPU 60% 목표추적).
   - 시작 템플릿 v6 = v5(`t3.small`) + user data 에 `superheader` 검사(`/health.html` 예외). default_version 은 4(`t2.small`) — 버전을 지정하지 않고 띄우면 구버전이 나온다. 인스턴스 리프레시 `cfe16cb8`(21:40~21:52 KST)로 2대 교체 완료.
-  - 전 버전이 골든 AMI `web-appache`(`ami-081f6180df874677d`, `web-ami` 인스턴스에서 생성)를 쓴다.
-  - 단독: `WAS-test-a`(10.0.20.235, 프로파일 `was-test-iam`) · `WEB-test-a`(10.0.10.51, **중지됨**, `mc-ec2-role` 부착, 타깃 해제 — WEB 계층 실험용) · `bas-server`(10.0.0.196, 퍼블릭 IP, 프로파일 없음) · `web-ami`(10.0.0.133, 퍼블릭 IP, t2.medium, `mc-ec2-role`).
+  - 전 버전이 골든 AMI `web-appache`(`ami-081f6180df874677d`, 9/15 `web-ami` 인스턴스에서 CreateImage)를 쓴다. v6 부터 설정은 user data 에 있어 AMI 를 다시 굽는 일은 패키지 갱신 때만.
+  - 단독: `WAS-test-a`(10.0.20.235, 프로파일 `was-test-iam`) · `WEB-test-a`(10.0.10.51, **중지됨**, `mc-ec2-role` 부착, 타깃 해제 — WEB 계층 실험용) · `bas-server`(10.0.0.196, 퍼블릭 IP, 프로파일 없음) · `web-ami`(10.0.0.133, t2.medium, `mc-ec2-role`, **중지됨** — 골든 AMI `web-appache` 의 원본, 역할 종료).
   - **WAS-test-a 실측 (SSH, 2026-09-19)** — user data 없이 **수동 설치**. AL2023 · Corretto **1.8.0_504**(JDK devel 포함) · Tomcat **9.0.121** `/opt/tomcat`, systemd `tomcat.service`(User=tomcat, `-Xms512m -Xmx1024m`, 힙덤프 `/data/dump`) · 포트 8080(HTTP), 8005(shutdown, localhost).
     - `/data` = 추가 20GB 암호화 볼륨(`/dev/sdf`): `logs/tomcat`(`/opt/tomcat/logs` 심볼릭 링크) · `dump` · `temp`.
     - 앱은 `/opt/tomcat/webapps/petclinic.war`(42.7MB, 9/16 10:19 복사, Tomcat 자동 배포). 서버에 소스 없음 → **밖에서 빌드해 WAR 만 복사**하는 방식. `-P MySQL` 로 빌드되어 `jdbc:mysql://database-1.c6vk…:3306/petclinic` **직결**, 사용자 `admin`(RDS 마스터).
     - Tomcat 기본 앱(`ROOT`·`docs`·`examples`·`manager`·`host-manager`)이 그대로 배포돼 있다. `mariadb105` 클라이언트 설치됨.
     - 재배포 = 새 WAR 를 `/tmp` 로 scp → `tomcat` 정지 → `webapps/petclinic{,.war}` 삭제 → 복사·chown → 시작. 1대뿐이라 그동안 502.
-  - SSM 관리 노드는 `mc-ec2-role` 이 붙은 인스턴스뿐 (ASG 2 + `web-ami` + 시작하면 `WEB-test-a`).
+  - SSM 관리 노드는 `mc-ec2-role` 이 붙은 인스턴스뿐 (ASG 2 + 시작하면 `web-ami` · `WEB-test-a`).
 - **보안 그룹** — `web-instance-sg` 는 `0.0.0.0/0` 규칙 없음. ⚠️ `SG-bastion` 은 **22·80·443** 을, `was-instance-sg` 는 **80·443·8080** 을 `0.0.0.0/0` 에 개방 (WAS 는 프라이빗 서브넷이라 VPC 안에서만 닿는다).
 - **IAM** — `mc-ec2-role` = `CloudWatchAgentServerPolicy` + `AmazonSSMManagedInstanceCore`. ⚠️ `was-test-iam` = `AmazonRDSFullAccess` (과잉). `rds-monitoring-role` 은 만들어져 있지만 미사용.
 - **데이터** — RDS `mysql 8.0.44` · `db.t3.small` · Multi-AZ · gp3 200GB(최대 1000) · 암호화 · 파라미터 그룹 `petclinic-mysql-log`(슬로우 쿼리 2초). ⚠️ **자동 백업 0일, 수동 스냅샷 0개.** 향상된 모니터링·PI 꺼짐.
