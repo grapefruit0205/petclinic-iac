@@ -25,10 +25,12 @@ resource "aws_ami" "web_apache" {
   }
 }
 
-# ASG 시작 템플릿. 실물은 latest=5(t3.small), default=4(t2.small). ASG 는 5 를 고정해 쓴다.
-# 이 블록은 latest(5) 의 내용이다 — 속성을 바꾸면 v6 이 생기고 default_version 은 그대로 4 다.
+# ASG 시작 템플릿. 실물은 latest=6(t3.small), default=4(t2.small). ASG 는 6 을 고정해 쓴다.
+# 이 블록은 latest(6) 의 내용이다 — 속성을 바꾸면 v7 이 생기고 default_version 은 그대로 4 다.
+# v6 (2026-09-19 21:40 KST): user data 에 CloudFront 커스텀 헤더(superheader) 검사 추가 — ALB 직접 접근은 403.
 resource "aws_launch_template" "web" {
   name            = "web"
+  description     = "superheader check: CloudFront-only access" # 최신 버전(v6) 의 버전 설명
   default_version = 4
 
   image_id      = aws_ami.web_apache.id
@@ -64,7 +66,7 @@ resource "aws_autoscaling_group" "web" {
 
   launch_template {
     id      = aws_launch_template.web.id
-    version = "5" # $Latest 가 아니라 버전 고정
+    version = "6" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다
   }
 
   # 그룹 지표 전부 켜져 있음
@@ -141,7 +143,8 @@ resource "aws_instance" "was_test_a" {
   }
 }
 
-# ASG 밖에서 Targetgroup-web 에 수동 등록된 web 1대. 프로파일 없음 → SSM 미관리.
+# ASG 밖의 수제 web 1대. 2026-09-19 21:45 KST Targetgroup-web 에서 등록 해제(헤더 검사 없는 v5 설정이라 우회 경로였음)
+# → 트래픽 안 받음. WEB 계층 실험용으로 남기고 mc-ec2-role 을 붙여 SSM 접속 가능하게 함. 22:21 KST 중지(비용) — 필요할 때 시작.
 resource "aws_instance" "web_test_a" {
   ami                         = "ami-0fad23d064f9e8330"
   instance_type               = "t3.micro"
@@ -150,6 +153,7 @@ resource "aws_instance" "web_test_a" {
   associate_public_ip_address = false
   vpc_security_group_ids      = [aws_security_group.web.id]
   key_name                    = "test-key"
+  iam_instance_profile        = aws_iam_instance_profile.ec2.name
   monitoring                  = false
 
   root_block_device {

@@ -103,15 +103,36 @@ resource "aws_wafv2_web_acl" "cloudfront" {
   }
 }
 
-# 오리진 2개: 기본 → Public ALB(https-only, Host 헤더 전달), /petclinic/resources/* → S3(OAC).
+# WAR 메뉴의 HOME/로고가 가리키는 /petclinic/ (옛 홈)을 S3 랜딩(/)으로 302 돌려보내는 뷰어 요청 함수.
+# 302(임시)라서 리디자인 WAR 를 배포한 뒤 연결만 떼면 원래대로 돌아온다. 코드는 콘솔에 게시된 LIVE 원문 그대로.
+resource "aws_cloudfront_function" "home_to_landing" {
+  name    = "petclinic-home-to-landing"
+  runtime = "cloudfront-js-2.0"
+  comment = ""
+  publish = true
+  code    = file("${path.module}/cloudfront/petclinic-home-to-landing.js")
+
+  # publish 는 API 가 아닌 Terraform 전용 인자라 import 로 state 에 들어오지 않는다 (ASG 의 force_delete 등과 같은 경우).
+  # 코드 변경은 콘솔에서 하고 여기엔 LIVE 원문을 복사하는 운영이라 무시해도 된다.
+  lifecycle {
+    ignore_changes = [publish]
+  }
+}
+
+# 오리진 2개 · 동작 3개 (2026-09-19 21:00 KST 콘솔 변경 반영):
+#   기본(*)                → S3  랜딩 사이트 (index.html · css/ · images/), CachingOptimized
+#   /petclinic/resources/* → S3  WAR 페이지가 쓰는 css·이미지, CachingOptimized
+#   /petclinic/*           → ALB 동적 앱, CachingDisabled + AllViewer (헤더·쿠키·쿼리스트링 전부 오리진으로)
+# /petclinic/* 를 AllViewer 로 두기 전엔 쿼리스트링이 잘려 보호자 검색(?lastName=)이 동작하지 않았다.
 # 직접 d3q5zkso8oivib.cloudfront.net 으로 오면 Host 가 ALB 인증서(*.mission-critical.site)와 안 맞아 502 — 별칭으로만 동작.
 resource "aws_cloudfront_distribution" "main" {
-  enabled         = true
-  is_ipv6_enabled = true
-  http_version    = "http2"
-  price_class     = "PriceClass_All"
-  aliases         = ["24petclinic.mission-critical.site"]
-  web_acl_id      = aws_wafv2_web_acl.cloudfront.arn
+  enabled             = true
+  is_ipv6_enabled     = true
+  http_version        = "http2"
+  price_class         = "PriceClass_All"
+  aliases             = ["24petclinic.mission-critical.site"]
+  default_root_object = "index.html"
+  web_acl_id          = aws_wafv2_web_acl.cloudfront.arn
 
   origin {
     origin_id   = "test-Public-ALB-1734796970.ap-northeast-2.elb.amazonaws.com-mu55v3ecfl1"
@@ -137,17 +158,17 @@ resource "aws_cloudfront_distribution" "main" {
     origin_access_control_id = aws_cloudfront_origin_access_control.static.id
   }
 
-  # 관리형 캐시 정책 UseOriginCacheControlHeaders (83da9c7e…): Host·Origin 헤더 + 모든 쿠키가 캐시 키
+  # 기본: S3 랜딩 사이트. 관리형 캐시 정책 CachingOptimized (658327ea…)
   default_cache_behavior {
-    target_origin_id       = "test-Public-ALB-1734796970.ap-northeast-2.elb.amazonaws.com-mu55v3ecfl1"
+    target_origin_id       = "mc-static-image.s3.ap-northeast-2.amazonaws.com"
     viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     compress               = true
-    cache_policy_id        = "83da9c7e-98b4-4e11-a168-04f0df8e2c65"
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
   }
 
-  # 관리형 캐시 정책 CachingOptimized (658327ea…)
+  # ordered_cache_behavior 는 적힌 순서가 우선순위다 — 구체적인 패턴이 먼저 와야 한다.
   ordered_cache_behavior {
     path_pattern           = "/petclinic/resources/*"
     target_origin_id       = "mc-static-image.s3.ap-northeast-2.amazonaws.com"
@@ -156,6 +177,23 @@ resource "aws_cloudfront_distribution" "main" {
     cached_methods         = ["GET", "HEAD"]
     compress               = true
     cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }
+
+  # 동적 앱. 관리형 CachingDisabled (4135ea2d…) + 오리진 요청 정책 AllViewer (216adef6…)
+  ordered_cache_behavior {
+    path_pattern             = "/petclinic/*"
+    target_origin_id         = "test-Public-ALB-1734796970.ap-northeast-2.elb.amazonaws.com-mu55v3ecfl1"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods           = ["GET", "HEAD"]
+    compress                 = true
+    cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+    origin_request_policy_id = "216adef6-5c7f-47e4-b989-5492eafa07d3"
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.home_to_landing.arn
+    }
   }
 
   restrictions {

@@ -348,6 +348,11 @@ import {
   to = aws_cloudfront_distribution.main
   id = "E1F6M0QDUUT8AG"
 }
+# 2026-09-19 21:19 KST 콘솔에서 만든 함수 — state 에 넣으려면 apply(import 1건, 변경 0) 가 한 번 필요하다
+import {
+  to = aws_cloudfront_function.home_to_landing
+  id = "petclinic-home-to-landing"
+}
 import {
   provider = aws.us_east_1
   to       = aws_wafv2_web_acl.cloudfront
