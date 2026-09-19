@@ -1,5 +1,11 @@
 # 조회 전용 data 소스. resource 블록은 없다 — apply 해도 아무것도 만들지 않는다.
 
+# --- 엣지 계층 ---
+# 3티어 진입점. 오리진·캐시 동작은 이 데이터 소스가 노출하지 않는다 (도메인·별칭·상태만).
+data "aws_cloudfront_distribution" "main" {
+  id = var.cloudfront_distribution_id
+}
+
 # --- 네트워크 ---
 data "aws_vpc" "main" {
   filter {
@@ -115,6 +121,11 @@ data "aws_db_subnet_group" "main" {
 
 # --- 스토리지 · 로그 ---
 data "aws_s3_bucket" "static" {
+  bucket = var.s3_bucket_name
+}
+
+# 버킷에 붙은 정책 문서 (CloudFront OAC 접근 허용). 정책이 없으면 조회가 실패한다.
+data "aws_s3_bucket_policy" "static" {
   bucket = var.s3_bucket_name
 }
 

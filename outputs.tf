@@ -51,6 +51,7 @@ output "asg_web" {
     instance_ips     = data.aws_instances.asg.private_ips
     target_groups    = data.aws_autoscaling_group.web.target_group_arns
     subnets          = data.aws_autoscaling_group.web.vpc_zone_identifier
+    launch_template  = data.aws_autoscaling_group.web.launch_template # ASG 가 고정한 버전 (숫자면 고정, $Latest 면 자동 추종)
   }
 }
 
@@ -146,4 +147,24 @@ output "log_groups" {
       kms_key_id        = lg.kms_key_id
     }
   }
+}
+
+# 엣지 진입점. 오리진·캐시 동작은 데이터 소스가 노출하지 않아 도메인·별칭·상태만 나온다.
+output "cloudfront" {
+  description = "CloudFront distribution: id, domain, aliases, status"
+  value = {
+    id          = data.aws_cloudfront_distribution.main.id
+    arn         = data.aws_cloudfront_distribution.main.arn
+    domain_name = data.aws_cloudfront_distribution.main.domain_name
+    aliases     = data.aws_cloudfront_distribution.main.aliases
+    status      = data.aws_cloudfront_distribution.main.status
+    enabled     = data.aws_cloudfront_distribution.main.enabled
+    web_acl_id  = data.aws_cloudfront_distribution.main.web_acl_id
+  }
+}
+
+# 정적 버에 연결된 리소스 정책 원문 (CloudFront OAC 접근 허용 여부 확인용).
+output "static_bucket_policy" {
+  description = "Static bucket resource policy (CloudFront OAC access)"
+  value       = data.aws_s3_bucket_policy.static.policy
 }

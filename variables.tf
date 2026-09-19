@@ -147,5 +147,15 @@ variable "log_group_names" {
   default = [
     "/aws/rds/instance/database-1/error",
     "/aws/rds/proxy/pet-proxy",
+    "/aws/rds/instance/database-1/slowquery",
+    "/petclinic/web/access",
+    "/petclinic/web/error",
   ]
+}
+
+# --- 엣지 계층 ---
+variable "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID (3-tier entry point)"
+  type        = string
+  default     = "E1F6M0QDUUT8AG"
 }
