@@ -52,15 +52,15 @@ state 가 있으므로 이제 `terraform plan` 은 **코드(2026-09-19 스냅샷
 | IAM | `iam.tf` | 역할 4 (`mc-ec2-role` · `was-test-iam` · `rds-monitoring-role` · RDS Proxy 역할), 프로파일 2, 고객 정책 1, 정책 연결 5 |
 | 데이터 | `database.tf` | RDS `database-1`, 파라미터 그룹, 서브넷 그룹, RDS Proxy + 기본 타깃 그룹 + 타깃 |
 | 스토리지·로그 | `storage.tf` | S3 `mc-static-image` + 정책 · 퍼블릭 차단 · 암호화, 로그 그룹 5 |
-| 엣지 | `edge.tf` | CloudFront 분포 + OAC, WAF 웹 ACL, CloudFront 인증서, Route53 존 + 레코드 3 (A · AAAA · ACM 검증) |
+| 엣지 | `edge.tf` | CloudFront 분포 + OAC + Function(`petclinic-home-to-landing`, 코드는 `cloudfront/`), WAF 웹 ACL, CloudFront 인증서, Route53 존 + 레코드 3 (A · AAAA · ACM 검증) |
 
-시작 템플릿과 `web-ami` 인스턴스의 user data 는 `userdata/` 에 스크립트 원문으로 있습니다. **바이트가 바뀌면 plan 에 변경으로 잡히니** 손대지 마세요.
+시작 템플릿(v6)과 `web-ami` 인스턴스의 user data 는 `userdata/` 에, CloudFront Function 코드는 `cloudfront/` 에 원문 그대로 있습니다. **바이트가 바뀌면 plan 에 변경으로 잡히니** 손대지 마세요 — 바꾸려면 콘솔에서 새 버전/게시를 만들고 그 원문을 다시 복사합니다.
 
 ### 콘솔에 있지만 코드에 없는 것
 
 | 리소스 | 이유 |
 |---|---|
-| `Targetgroup-web` ← `WEB-test-a`, `tg-internal-alb` ← `WAS-test-a` 수동 타깃 등록 | `aws_lb_target_group_attachment` 가 import 미지원 |
+| `tg-internal-alb` ← `WAS-test-a` 수동 타깃 등록 | `aws_lb_target_group_attachment` 가 import 미지원 (`WEB-test-a` 는 2026-09-19 21:45 KST 등록 해제됨) |
 | 키페어 `test-key` | 퍼블릭 키를 API 로 못 읽어 import 불가. 이름만 문자열로 참조 |
 | VPC 엔드포인트 `vpce-0bc81ff97ecbceb74` | RDS Proxy 가 만든 AWS 관리 엔드포인트 — 사용자 리소스가 아님 |
 | Public ALB 의 EIP 2개 (`52.78.70.34` · `3.38.76.227`) | ELB 가 관리 |
@@ -74,6 +74,7 @@ state 가 있으므로 이제 `terraform plan` 은 **코드(2026-09-19 스냅샷
 
 - ASG `force_delete` · `force_delete_warm_pool` · `ignore_failed_scaling_activities` · `wait_for_capacity_timeout` — Terraform 전용 인자. import 로 state 에 들어오지 않아 변경으로 잡히기 때문에 무시한다.
 - 리스너 3개의 `default_action[0].forward` — 실물의 stickiness duration 이 0 인데 provider 는 1 이상만 받는다. 단일 타깃 그룹 forward 는 `target_group_arn` 이 전부.
+- CloudFront Function `publish` — Terraform 전용 인자. 코드 변경은 콘솔에서 게시하고 `cloudfront/` 에 원문을 복사하는 운영.
 - RDS `manage_master_user_password` 는 코드에 **넣지 않았다** — provider 가 import 시 이 값을 읽지 않아, 넣으면 변경으로 잡힌다.
 
 ## 실물 구조 (2026-09-19 실측)
@@ -81,33 +82,47 @@ state 가 있으므로 이제 `terraform plan` 은 **코드(2026-09-19 스냅샷
 ```
 Route53 24petclinic.mission-critical.site (A/AAAA alias)
   → CloudFront E1F6M0QDUUT8AG (WAF: 관리형 룰 3개, 전부 Count)
-      ├ 기본 동작 → Public ALB :443 (https-only, Host 헤더 전달)
-      │     → Targetgroup-web :80 = ASG web-test 2대(t3.small) + WEB-test-a
-      │         httpd 리버스프록시 /petclinic/ → Internal ALB :80
-      │             → tg-internal-alb :8080 = WAS-test-a (t3.medium, 1대)
-      │                 → RDS Proxy pet-proxy → RDS database-1 (MySQL 8.0.44, db.t3.small, Multi-AZ, 200GB)
-      └ /petclinic/resources/* → S3 mc-static-image (OAC)
+      ├ 기본(*)                → S3 mc-static-image (OAC)  랜딩 사이트: index.html · css/ · images/hero/hero.mp4
+      ├ /petclinic/resources/* → S3 mc-static-image (OAC)  WAR 페이지용 css·폰트·이미지
+      └ /petclinic/*           → Public ALB :443 (CachingDisabled + AllViewer, https-only, Host 헤더 전달)
+              → Targetgroup-web :80 = ASG web-test 2대(t3.small) + WEB-test-a
+                  httpd 리버스프록시 /petclinic/ → Internal ALB :80
+                      → tg-internal-alb :8080 = WAS-test-a (Tomcat 9.0.121 · Corretto 8, 1대)
+                          → RDS database-1 직결 (MySQL 8.0.44, db.t3.small, Multi-AZ, 200GB)
+                            ※ RDS Proxy pet-proxy 는 만들어져 있지만 아무도 안 씀 (ClientConnections 0)
 ```
 
-- **엣지** — CloudFront `d3q5zkso8oivib.cloudfront.net` · 상태 `Deployed` · 별칭 `24petclinic.mission-critical.site`.
-  - Route53 존 `Z08667423LQZPT6BSL30W` 에 **A + AAAA alias 레코드가 있고** 공개 DNS 로 풀린다 (`https://24petclinic.mission-critical.site/petclinic/` → 200).
-  - `d3q5zkso8oivib.cloudfront.net` 으로 직접 오면 **502** — Host 헤더가 ALB 인증서(`*.mission-critical.site`)와 안 맞기 때문. 별칭으로만 동작한다.
+랜딩(`/`)은 WEB 파트가 S3 로 배포하고, 버튼(보호자 찾기·등록, 수의사)만 WAS 의 기능 페이지로 간다. WAS 의 옛 홈(`/petclinic/`)은 링크하지 않는다.
+
+- **엣지** — CloudFront `d3q5zkso8oivib.cloudfront.net` · 상태 `Deployed` · 별칭 `24petclinic.mission-critical.site` · Default root object `index.html`.
+  - 동작 3개 (2026-09-19 21:00 KST 콘솔 변경, `edge.tf` 반영): 기본 → S3 · `/petclinic/resources/*` → S3 · `/petclinic/*` → ALB (`CachingDisabled` + `AllViewer`).
+  - `/petclinic/*` 에 뷰어 요청 함수 `petclinic-home-to-landing` (21:19 KST): WAR 메뉴의 HOME(`/petclinic/`)을 랜딩 `/` 로 302. `/petclinic`(슬래시 없음)은 `/petclinic/*` 에 안 걸려 S3 403 — 정확 일치 동작을 만들면 해결(미적용).
+  - 변경 전엔 기본 동작(`UseOriginCacheControlHeaders`, 오리진 요청 정책 없음)이 **쿼리스트링을 오리진에 안 넘겨** 보호자 검색(`/owners?lastName=`)이 전체 목록만 돌려줬다. `AllViewer` 로 해결 (`?lastName=Franklin` → 302 `/owners/1` 확인).
+  - Route53 존 `Z08667423LQZPT6BSL30W` 에 **A + AAAA alias 레코드가 있고** 공개 DNS 로 풀린다 (`https://24petclinic.mission-critical.site/` → 200, S3 랜딩).
+  - `d3q5zkso8oivib.cloudfront.net` 으로 직접 오면 `/petclinic/*` 는 **502** — Host 헤더가 ALB 인증서(`*.mission-critical.site`)와 안 맞기 때문. 별칭으로만 동작한다.
   - ALB 오리진에 커스텀 헤더 `superheader` 가 붙어 있지만 ALB 리스너에 이를 검사하는 규칙은 없다.
   - WAF `CreatedByCloudFront-2407cc5b`: 관리형 룰 3개 전부 **Count** — 차단하지 않는다. 로깅 없음.
   - ACM `*.mission-critical.site` 2장 (ap-northeast-2 = ALB, us-east-1 = CloudFront), DNS 검증, 2027-04 만료.
-- **진입** — Public ALB 리스너 443(ACM, `TLS13-1-2-Res-PQ-2025-09`) + **80 은 리다이렉트가 아니라 forward**. `alb-public-sg` 가 80·443 을 전체 개방이라 CloudFront·WAF 를 우회해 ALB 로 직접 접근 가능.
-  - `Targetgroup-web` 타깃 3개 = ASG 2대 + `WEB-test-a`(수동 등록). `tg-internal-alb` 는 `WAS-test-a` 1대뿐 (SPOF).
-- **컴퓨트** — ASG `web-test` (min 2 · max 4 · desired 2, 시작 템플릿 `web` **v5 고정**, ELB 헬스체크, CPU 60% 목표추적).
-  - 시작 템플릿 v5 = `t3.small`, default_version 은 4(`t2.small`). 버전을 지정하지 않고 띄우면 구버전이 나온다.
+- **진입** — Public ALB 리스너 443(ACM, `TLS13-1-2-Res-PQ-2025-09`) + **80 은 리다이렉트가 아니라 forward**. `alb-public-sg` 는 여전히 80·443 전체 개방이지만, **웹 계층 httpd 가 CloudFront 커스텀 헤더(`superheader`)를 검사해 직접 접근은 403** (시작 템플릿 v6, 2026-09-19 21:40 KST). SG 자체를 CloudFront prefix list 로 좁히는 건 다음 단계.
+  - `Targetgroup-web` 타깃 = ASG 2대뿐 (`WEB-test-a` 는 21:45 KST 등록 해제). `tg-internal-alb` 는 `WAS-test-a` 1대뿐 (SPOF).
+- **컴퓨트** — ASG `web-test` (min 2 · max 4 · desired 2, 시작 템플릿 `web` **v6 고정**, ELB 헬스체크, CPU 60% 목표추적).
+  - 시작 템플릿 v6 = v5(`t3.small`) + user data 에 `superheader` 검사(`/health.html` 예외). default_version 은 4(`t2.small`) — 버전을 지정하지 않고 띄우면 구버전이 나온다. 인스턴스 리프레시 `cfe16cb8`(21:40~21:52 KST)로 2대 교체 완료.
   - 전 버전이 골든 AMI `web-appache`(`ami-081f6180df874677d`, `web-ami` 인스턴스에서 생성)를 쓴다.
-  - 단독: `WAS-test-a`(10.0.20.235, 프로파일 `was-test-iam`) · `WEB-test-a`(10.0.10.51, 프로파일 없음) · `bas-server`(10.0.0.196, 퍼블릭 IP, 프로파일 없음) · `web-ami`(10.0.0.133, 퍼블릭 IP, t2.medium, `mc-ec2-role`).
-  - SSM 관리 노드는 `mc-ec2-role` 이 붙은 3대뿐 (ASG 2 + `web-ami`).
+  - 단독: `WAS-test-a`(10.0.20.235, 프로파일 `was-test-iam`) · `WEB-test-a`(10.0.10.51, **중지됨**, `mc-ec2-role` 부착, 타깃 해제 — WEB 계층 실험용) · `bas-server`(10.0.0.196, 퍼블릭 IP, 프로파일 없음) · `web-ami`(10.0.0.133, 퍼블릭 IP, t2.medium, `mc-ec2-role`).
+  - **WAS-test-a 실측 (SSH, 2026-09-19)** — user data 없이 **수동 설치**. AL2023 · Corretto **1.8.0_504**(JDK devel 포함) · Tomcat **9.0.121** `/opt/tomcat`, systemd `tomcat.service`(User=tomcat, `-Xms512m -Xmx1024m`, 힙덤프 `/data/dump`) · 포트 8080(HTTP), 8005(shutdown, localhost).
+    - `/data` = 추가 20GB 암호화 볼륨(`/dev/sdf`): `logs/tomcat`(`/opt/tomcat/logs` 심볼릭 링크) · `dump` · `temp`.
+    - 앱은 `/opt/tomcat/webapps/petclinic.war`(42.7MB, 9/16 10:19 복사, Tomcat 자동 배포). 서버에 소스 없음 → **밖에서 빌드해 WAR 만 복사**하는 방식. `-P MySQL` 로 빌드되어 `jdbc:mysql://database-1.c6vk…:3306/petclinic` **직결**, 사용자 `admin`(RDS 마스터).
+    - Tomcat 기본 앱(`ROOT`·`docs`·`examples`·`manager`·`host-manager`)이 그대로 배포돼 있다. `mariadb105` 클라이언트 설치됨.
+    - 재배포 = 새 WAR 를 `/tmp` 로 scp → `tomcat` 정지 → `webapps/petclinic{,.war}` 삭제 → 복사·chown → 시작. 1대뿐이라 그동안 502.
+  - SSM 관리 노드는 `mc-ec2-role` 이 붙은 인스턴스뿐 (ASG 2 + `web-ami` + 시작하면 `WEB-test-a`).
 - **보안 그룹** — `web-instance-sg` 는 `0.0.0.0/0` 규칙 없음. ⚠️ `SG-bastion` 은 **22·80·443** 을, `was-instance-sg` 는 **80·443·8080** 을 `0.0.0.0/0` 에 개방 (WAS 는 프라이빗 서브넷이라 VPC 안에서만 닿는다).
 - **IAM** — `mc-ec2-role` = `CloudWatchAgentServerPolicy` + `AmazonSSMManagedInstanceCore`. ⚠️ `was-test-iam` = `AmazonRDSFullAccess` (과잉). `rds-monitoring-role` 은 만들어져 있지만 미사용.
 - **데이터** — RDS `mysql 8.0.44` · `db.t3.small` · Multi-AZ · gp3 200GB(최대 1000) · 암호화 · 파라미터 그룹 `petclinic-mysql-log`(슬로우 쿼리 2초). ⚠️ **자동 백업 0일, 수동 스냅샷 0개.** 향상된 모니터링·PI 꺼짐.
-  - RDS Proxy: Secrets Manager 인증, IAM 인증 꺼짐, `RequireTLS=false`.
+  - RDS Proxy: Secrets Manager 인증, IAM 인증 꺼짐, `RequireTLS=false`. **그러나 WAS 는 프록시를 거치지 않고 RDS 에 직결** (CloudWatch `ClientConnections` 0, WAR 의 `jdbc.url` 이 인스턴스 엔드포인트).
+  - ⚠️ WAR 에 박힌 `admin` 비밀번호는 RDS 관리형 시크릿이라 **자동 교체가 켜져 있다** — 교체되는 순간 앱 DB 접속이 끊긴다. 전용 앱 사용자 + 교체 없는 시크릿으로 바꿔야 한다.
 - **스토리지** — 버킷은 `mc-static-image` 하나뿐 → ALB·CloudFront 로그 버킷 없음. ALB 2대 모두 액세스 로깅 꺼짐.
-  - ⚠️ 2026-09-19 18:46 KST 업로드된 객체 20개가 전부 `petclinic/resources/resources/…`(경로 중복)이고 `css/` 가 없다. CloudFront 경유 `/petclinic/resources/css/petclinic.css` 는 **403**. ALB 직접 접근은 200.
+  - 버킷 구조 (2026-09-19 21:10 KST): 루트에 랜딩(`index.html` · `css/mc-site.css` · `images/hero-poster.jpg` · `images/hero/hero.mp4`), `petclinic/resources/{css,fonts,images,js}` 에 WAR 페이지용 정적 파일 22개. 원본은 `middleproject` 의 `docs/site-static/` 과 `src/main/webapp/resources/`(`less/` 제외).
+  - 정적 파일을 바꾸면 S3 업로드 + CloudFront 무효화(`/*` 또는 바뀐 경로). 무효화 안 하면 하루(CachingOptimized 기본 TTL) 동안 옛것이 보인다.
 - **로그** — 로그 그룹 5개. `/petclinic/web/access`(30일) · `/petclinic/web/error`(90일), RDS 쪽 3개는 보존기간 없음. `audit` 내보내기가 켜져 있지만 옵션 그룹에 플러그인이 없어 로그 그룹이 생기지 않는다.
 - **알림** — SNS 토픽 없음, 알람은 목표추적용 2개뿐, 리전 CloudTrail 없음.
 
