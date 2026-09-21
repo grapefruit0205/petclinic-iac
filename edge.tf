@@ -19,7 +19,7 @@ resource "aws_acm_certificate" "cloudfront" {
   key_algorithm             = "RSA_2048"
 }
 
-# CloudFront 콘솔이 만든 웹 ACL. ⚠️ 관리형 룰 3개 전부 Count (차단 없음), 로깅 없음.
+# CloudFront 콘솔이 만든 웹 ACL. ⚠️ 관리형 룰 4개 전부 Count (차단 없음), 로깅 없음.  (rule4 = SQLi, none)
 resource "aws_wafv2_web_acl" "cloudfront" {
   provider = aws.us_east_1
 
@@ -92,6 +92,29 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "AWS-AWSManagedRulesKnownBadInputsRuleSet"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # 4번째 룰만 none — 앞의 3개는 Count 라 탐지만 하고 차단하지 않는다.
+  rule {
+    name     = "AWS-AWSManagedRulesSQLiRuleSet"
+    priority = 3
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesSQLiRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "AWS-AWSManagedRulesSQLiRuleSet"
       sampled_requests_enabled   = true
     }
   }

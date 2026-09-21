@@ -1,0 +1,19 @@
+{
+  "ImageId": "REPLACE_WITH_AMI_ID",
+  "InstanceType": "t3.medium",
+  "KeyName": "test-key",
+  "IamInstanceProfile": { "Name": "was-ec2-role" },
+  "NetworkInterfaces": [
+    { "DeviceIndex": 0, "Groups": ["sg-0e3df15b6c658f161"], "AssociatePublicIpAddress": false, "DeleteOnTermination": true }
+  ],
+  "BlockDeviceMappings": [
+    { "DeviceName": "/dev/xvda", "Ebs": { "VolumeSize": 20, "VolumeType": "gp3", "DeleteOnTermination": true } },
+    { "DeviceName": "/dev/sdf",  "Ebs": { "VolumeSize": 20, "VolumeType": "gp3", "Encrypted": true, "DeleteOnTermination": true } }
+  ],
+  "Monitoring": { "Enabled": true },
+  "MetadataOptions": { "HttpTokens": "required", "HttpPutResponseHopLimit": 2 },
+  "TagSpecifications": [
+    { "ResourceType": "instance", "Tags": [ { "Key": "Name", "Value": "WAS-asg" }, { "Key": "Tier", "Value": "was" } ] },
+    { "ResourceType": "volume",   "Tags": [ { "Key": "Name", "Value": "was-data" }, { "Key": "Tier", "Value": "was" } ] }
+  ]
+}

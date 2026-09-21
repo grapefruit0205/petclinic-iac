@@ -106,7 +106,7 @@ Route53 24petclinic.mission-critical.site (A/AAAA alias)
 - **진입** — Public ALB 리스너 443(ACM, `TLS13-1-2-Res-PQ-2025-09`) + **80 은 리다이렉트가 아니라 forward**. `alb-public-sg` 는 여전히 80·443 전체 개방이지만, **웹 계층 httpd 가 CloudFront 커스텀 헤더(`superheader`)를 검사해 직접 접근은 403** (시작 템플릿 v6, 2026-09-19 21:40 KST). SG 자체를 CloudFront prefix list 로 좁히는 건 다음 단계.
   - `Targetgroup-web` 타깃 = ASG 2대뿐 (`WEB-test-a` 는 21:45 KST 등록 해제). `tg-internal-alb` 는 `WAS-test-a` 1대뿐 (SPOF).
 - **컴퓨트** — ASG `web-test` (min 2 · max 4 · desired 2, 시작 템플릿 `web` **v6 고정**, ELB 헬스체크, CPU 60% 목표추적).
-  - 시작 템플릿 v6 = v5(`t3.small`) + user data 에 `superheader` 검사(`/health.html` 예외). default_version 은 4(`t2.small`) — 버전을 지정하지 않고 띄우면 구버전이 나온다. 인스턴스 리프레시 `cfe16cb8`(21:40~21:52 KST)로 2대 교체 완료.
+  - 시작 템플릿 v6 = v5(`t3.small`) + user data 에 `superheader` 검사(`/health.html` 예외). default_version 도 6 (2026-09-20 콘솔에서 4→6 — 버전 미지정 시 구버전 t2.small 이 뜨던 함정 해소). 인스턴스 리프레시 `cfe16cb8`(9/19 21:40~21:52 KST)로 2대 교체 완료.
   - 전 버전이 골든 AMI `web-appache`(`ami-081f6180df874677d`, 9/15 `web-ami` 인스턴스에서 CreateImage)를 쓴다. v6 부터 설정은 user data 에 있어 AMI 를 다시 굽는 일은 패키지 갱신 때만.
   - 단독: `WAS-test-a`(10.0.20.235, 프로파일 `was-test-iam`) · `WEB-test-a`(10.0.10.51, **중지됨**, `mc-ec2-role` 부착, 타깃 해제 — WEB 계층 실험용) · `bas-server`(10.0.0.196, 퍼블릭 IP, 프로파일 없음) · `web-ami`(10.0.0.133, t2.medium, `mc-ec2-role`, **중지됨** — 골든 AMI `web-appache` 의 원본, 역할 종료).
   - **WAS-test-a 실측 (SSH, 2026-09-19)** — user data 없이 **수동 설치**. AL2023 · Corretto **1.8.0_504**(JDK devel 포함) · Tomcat **9.0.121** `/opt/tomcat`, systemd `tomcat.service`(User=tomcat, `-Xms512m -Xmx1024m`, 힙덤프 `/data/dump`) · 포트 8080(HTTP), 8005(shutdown, localhost).
