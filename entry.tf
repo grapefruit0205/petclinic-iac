@@ -14,10 +14,10 @@ resource "aws_lb" "public" {
   enable_http2               = true
   drop_invalid_header_fields = false
 
-  # 액세스 로그 꺼짐 — 로그 버킷이 없다
   access_logs {
-    bucket  = ""
-    enabled = false
+    bucket  = "petclinic-log-alb"
+    prefix  = "alb/public"
+    enabled = true
   }
   connection_logs {
     bucket  = ""
@@ -38,8 +38,9 @@ resource "aws_lb" "internal" {
   drop_invalid_header_fields = false
 
   access_logs {
-    bucket  = ""
-    enabled = false
+    bucket  = "petclinic-log-alb"
+    prefix  = "alb/internal"
+    enabled = true
   }
   connection_logs {
     bucket  = ""
