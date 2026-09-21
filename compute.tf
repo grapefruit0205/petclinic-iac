@@ -25,13 +25,13 @@ resource "aws_ami" "web_apache" {
   }
 }
 
-# ASG 시작 템플릿. 실물은 latest=6(t3.small), default=4(t2.small). ASG 는 6 을 고정해 쓴다.
-# 이 블록은 latest(6) 의 내용이다 — 속성을 바꾸면 v7 이 생기고 default_version 은 그대로 4 다.
+# ASG 시작 템플릿. 실물은 latest=6(t3.small), default=6 (2026-09-20 콘솔에서 4→6 으로 올림). ASG 는 6 을 고정해 쓴다.
+# 이 블록은 latest(6) 의 내용이다 — 속성을 바꾸면 v7 이 생기고 default_version 은 그대로 6 이다.
 # v6 (2026-09-19 21:40 KST): user data 에 CloudFront 커스텀 헤더(superheader) 검사 추가 — ALB 직접 접근은 403.
 resource "aws_launch_template" "web" {
   name            = "web"
   description     = "superheader check: CloudFront-only access" # 최신 버전(v6) 의 버전 설명
-  default_version = 4
+  default_version = 6
 
   image_id      = aws_ami.web_apache.id
   instance_type = "t3.small"
