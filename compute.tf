@@ -168,7 +168,9 @@ resource "aws_instance" "web_test_a" {
   }
 }
 
-# 베스천. 퍼블릭 서브넷, 퍼블릭 IP 자동 할당(EIP 아님). 프로파일 없음.
+# 베스천. 퍼블릭 서브넷, 퍼블릭 IP 자동 할당(EIP 아님). 프로파일 없음. 2026-09-21 실측 running.
+# 운영 방침(2026-09-21 결정): 베스천 유지 + SSM(Session Manager) 병행. EC2 Instance Connect Endpoint(network.tf)는
+# 같은 날 추가된 부가 경로로, 정리 여부는 미정. 다음 손볼 것: mc-ec2-role 부착(SSM·로그), SG-bastion 22 를 팀원 IP 로 축소, EIP.
 resource "aws_instance" "bastion" {
   ami                         = "ami-0fad23d064f9e8330"
   instance_type               = "t3.micro"

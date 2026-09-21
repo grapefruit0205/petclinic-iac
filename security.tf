@@ -1,4 +1,4 @@
-# 보안 그룹 6개 — 규칙은 인라인 블록 (import 시 provider 가 읽어 오는 형태 그대로).
+# 보안 그룹 7개(eice-sg 포함) — 규칙은 인라인 블록 (import 시 provider 가 읽어 오는 형태 그대로).
 # 규칙 묶음(블록) 단위는 실물의 IpPermissions 그룹과 1:1 이어야 plan 이 0 이다.
 # `default` SG 는 VPC 기본이라 관리 대상에서 뺐다 (data.tf 에서 조회만).
 
@@ -128,6 +128,14 @@ resource "aws_security_group" "web" {
     protocol        = "tcp"
     security_groups = [aws_security_group.bastion.id]
   }
+  # 2026-09-21: EC2 Instance Connect Endpoint 경유 SSH (부가 경로). 베스천은 유지하므로 위의 bastion 참조 블록도 그대로 둔다.
+  ingress {
+    description     = "eice"
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.eice.id]
+  }
 
   egress {
     from_port   = 0
@@ -171,6 +179,7 @@ resource "aws_security_group" "was" {
     protocol        = "tcp"
     security_groups = [aws_security_group.bastion.id]
   }
+  # EICE 로 WAS 에 들어가려면 여기에 22 ← aws_security_group.eice 규칙이 필요하다 — WAS 담당이 넣기로 하고 2026-09-21 테스트 규칙은 회수했다.
 
   egress {
     from_port   = 0
@@ -199,5 +208,24 @@ resource "aws_security_group" "db" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# EC2 Instance Connect Endpoint 전용 (2026-09-21). 인바운드 없음, 아웃바운드는 VPC 안 22 만.
+# web SG 의 "22 ← eice" 규칙이 이 SG 를 소스로 참조한다 (베스천 SG 참조와 병행).
+resource "aws_security_group" "eice" {
+  name        = "eice-sg"
+  description = "EC2 Instance Connect Endpoint"
+  vpc_id      = aws_vpc.main.id
+
+  egress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
+  }
+
+  tags = {
+    Name = "eice-sg"
   }
 }

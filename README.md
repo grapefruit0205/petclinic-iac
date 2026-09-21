@@ -45,13 +45,13 @@ state 가 있으므로 이제 `terraform plan` 은 **코드(2026-09-19 스냅샷
 
 | 계층 | 파일 | 리소스 |
 |---|---|---|
-| 네트워크 | `network.tf` | VPC, 서브넷 8, IGW, NAT 2 + EIP 2, 라우트 테이블 5 + 기본 테이블, 연결 8 |
-| 보안 | `security.tf` | 보안 그룹 6 (규칙 인라인) |
-| 진입 | `entry.tf` | ALB 2, 타깃 그룹 2, 리스너 3 (443 ACM · 80 · internal 80), ALB 인증서 |
+| 네트워크 | `network.tf` | VPC, 서브넷 8, IGW, NAT 2 + EIP 2, 라우트 테이블 5 + 기본 테이블, 연결 8, EC2 Instance Connect Endpoint 1 (2026-09-21 추가 — 베스천은 유지, 부가 경로) |
+| 보안 | `security.tf` | 보안 그룹 7 (규칙 인라인; `eice-sg` 는 2026-09-21 추가) |
+| 진입 | `entry.tf` | ALB 2, 타깃 그룹 2, 리스너 3 (443 ACM · 80 · internal 80), 443 `superheader` 리스너 규칙, ALB 인증서 |
 | 컴퓨트 | `compute.tf` | 골든 AMI `web-appache`, 시작 템플릿 `web`, ASG `web-test` + CPU 60% 목표추적 정책, 단독 인스턴스 4, WAS 데이터 볼륨 + 연결 |
 | IAM | `iam.tf` | 역할 4 (`mc-ec2-role` · `was-test-iam` · `rds-monitoring-role` · RDS Proxy 역할), 프로파일 2, 고객 정책 1, 정책 연결 5 |
 | 데이터 | `database.tf` | RDS `database-1`, 파라미터 그룹, 서브넷 그룹, RDS Proxy + 기본 타깃 그룹 + 타깃 |
-| 스토리지·로그 | `storage.tf` | S3 `mc-static-image` + 정책 · 퍼블릭 차단 · 암호화, 로그 그룹 5 |
+| 스토리지·로그 | `storage.tf` | S3 `mc-static-image` + 정책 · 퍼블릭 차단 · 암호화, ALB 로그 버킷 `petclinic-log-alb` + 정책 · 퍼블릭 차단 · 수명주기(90일), 로그 그룹 5 |
 | 엣지 | `edge.tf` | CloudFront 분포 + OAC + Function(`petclinic-home-to-landing`, 코드는 `cloudfront/`), WAF 웹 ACL, CloudFront 인증서, Route53 존 + 레코드 3 (A · AAAA · ACM 검증) |
 
 시작 템플릿(v6)과 `web-ami` 인스턴스의 user data 는 `userdata/` 에, CloudFront Function 코드는 `cloudfront/` 에 원문 그대로 있습니다. **바이트가 바뀌면 plan 에 변경으로 잡히니** 손대지 마세요 — 바꾸려면 콘솔에서 새 버전/게시를 만들고 그 원문을 다시 복사합니다.
@@ -100,7 +100,7 @@ Route53 24petclinic.mission-critical.site (A/AAAA alias)
   - 변경 전엔 기본 동작(`UseOriginCacheControlHeaders`, 오리진 요청 정책 없음)이 **쿼리스트링을 오리진에 안 넘겨** 보호자 검색(`/owners?lastName=`)이 전체 목록만 돌려줬다. `AllViewer` 로 해결 (`?lastName=Franklin` → 302 `/owners/1` 확인).
   - Route53 존 `Z08667423LQZPT6BSL30W` 에 **A + AAAA alias 레코드가 있고** 공개 DNS 로 풀린다 (`https://24petclinic.mission-critical.site/` → 200, S3 랜딩).
   - `d3q5zkso8oivib.cloudfront.net` 으로 직접 오면 `/petclinic/*` 는 **502** — Host 헤더가 ALB 인증서(`*.mission-critical.site`)와 안 맞기 때문. 별칭으로만 동작한다.
-  - ALB 오리진에 커스텀 헤더 `superheader` 가 붙어 있지만 ALB 리스너에 이를 검사하는 규칙은 없다.
+  - ALB 오리진에 커스텀 헤더 `superheader` 가 붙고, **Public ALB 443 리스너가 이를 검사한다** (2026-09-21: 기본 동작 403 고정 응답 + 우선순위 1 규칙 `superheader` 일치 시 forward, `entry.tf` `aws_lb_listener_rule.public_https_superheader`).
   - WAF `CreatedByCloudFront-2407cc5b`: 관리형 룰 3개 전부 **Count** — 차단하지 않는다. 로깅 없음.
   - ACM `*.mission-critical.site` 2장 (ap-northeast-2 = ALB, us-east-1 = CloudFront), DNS 검증, 2027-04 만료.
 - **진입** — Public ALB 리스너 443(ACM, `TLS13-1-2-Res-PQ-2025-09`) + **80 은 리다이렉트가 아니라 forward**. `alb-public-sg` 는 여전히 80·443 전체 개방이지만, **웹 계층 httpd 가 CloudFront 커스텀 헤더(`superheader`)를 검사해 직접 접근은 403** (시작 템플릿 v6, 2026-09-19 21:40 KST). SG 자체를 CloudFront prefix list 로 좁히는 건 다음 단계.

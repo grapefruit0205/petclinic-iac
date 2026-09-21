@@ -15,7 +15,7 @@ resource "aws_lb" "public" {
   drop_invalid_header_fields = false
 
   access_logs {
-    bucket  = "petclinic-log-alb"
+    bucket  = aws_s3_bucket.alb_logs.bucket
     prefix  = "alb/public"
     enabled = true
   }
@@ -38,7 +38,7 @@ resource "aws_lb" "internal" {
   drop_invalid_header_fields = false
 
   access_logs {
-    bucket  = "petclinic-log-alb"
+    bucket  = aws_s3_bucket.alb_logs.bucket
     prefix  = "alb/internal"
     enabled = true
   }
@@ -108,33 +108,64 @@ resource "aws_lb_listener" "public_https" {
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09"
   certificate_arn   = aws_acm_certificate.alb.arn
 
+  # 2026-09-21 콘솔 변경: 기본 동작을 forward → 403 고정 응답으로. 실제 forward 는 아래 superheader 규칙(우선순위 1)만 한다.
+  # → CloudFront 를 안 거친 ALB 직접 접근은 웹 인스턴스에 닿기 전에 ALB 에서 끊긴다 (httpd 의 superheader 검사는 2중 방어로 남는다).
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.web.arn
-  }
+    type = "fixed-response"
 
-  # provider 가 default_action.forward 블록(stickiness 포함)을 함께 읽어 오는데, 실물의 stickiness duration 이
-  # 0 이라 코드로 표현할 수 없다(허용 범위 1~604800). 단일 타깃 그룹 forward 는 target_group_arn 이 전부이므로 무시한다.
-  lifecycle {
-    ignore_changes = [default_action[0].forward]
+    fixed_response {
+      content_type = "text/plain"
+      status_code  = "403"
+    }
   }
 }
 
-# 80 은 HTTPS 리다이렉트가 아니라 그대로 forward 다.
+# 443 의 유일한 규칙: CloudFront 오리진 커스텀 헤더 superheader 가 맞을 때만 Targetgroup-web 으로 forward.
+# 값은 edge.tf 의 오리진 커스텀 헤더 · userdata/web.sh 의 CF_SECRET 과 같아야 한다.
+resource "aws_lb_listener_rule" "public_https_superheader" {
+  listener_arn = aws_lb_listener.public_https.arn
+  priority     = 1
+
+  # 리스너 규칙은 provider 가 forward 블록만 읽어 오고 target_group_arn 은 비워 둔다 → forward 블록으로 적어야 plan 이 0.
+  # (실물 stickiness duration 이 3600 이라 리스너와 달리 그대로 표현 가능)
+  action {
+    type = "forward"
+
+    forward {
+      target_group {
+        arn    = aws_lb_target_group.web.arn
+        weight = 1
+      }
+
+      stickiness {
+        enabled  = false
+        duration = 3600
+      }
+    }
+  }
+
+  condition {
+    http_header {
+      http_header_name = "superheader"
+      values           = ["__CF_SECRET__"]
+    }
+  }
+}
+
+# 80 → 443 리다이렉트 (2026-09-21 변경. 그 전엔 forward). CloudFront 는 443 으로만 오고 직접 접근은 어차피 403 이라 실효보다 정리 목적.
 resource "aws_lb_listener" "public_http" {
   load_balancer_arn = aws_lb.public.arn
   port              = 80
   protocol          = "HTTP"
 
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.web.arn
-  }
+    type = "redirect"
 
-  # provider 가 default_action.forward 블록(stickiness 포함)을 함께 읽어 오는데, 실물의 stickiness duration 이
-  # 0 이라 코드로 표현할 수 없다(허용 범위 1~604800). 단일 타깃 그룹 forward 는 target_group_arn 이 전부이므로 무시한다.
-  lifecycle {
-    ignore_changes = [default_action[0].forward]
+    redirect {
+      protocol    = "HTTPS"
+      port        = "443"
+      status_code = "HTTP_301"
+    }
   }
 }
 
