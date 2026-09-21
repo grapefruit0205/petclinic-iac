@@ -265,3 +265,17 @@ resource "aws_route_table_association" "private6_2c" {
   subnet_id      = aws_subnet.private6_2c.id
   route_table_id = aws_route_table.private4_2c.id
 }
+
+# --- 접속: EC2 Instance Connect Endpoint (2026-09-21 추가. 베스천은 유지하기로 해 이건 부가 경로 — 정리 여부 미정) ---
+# 내 PC 에서 `aws ec2-instance-connect ssh --connection-type eice` / `open-tunnel` 로 프라이빗 인스턴스 22 에 터널을 연다.
+# 인스턴스 쪽은 sshd 만 있으면 되므로 SSM 에이전트·NAT 가 죽어도 살아 있는 예비 통로. 시간당 요금 없음.
+# preserve_client_ip = false → 인스턴스 SG 는 eice-sg 만 허용하면 된다 (true 면 팀원 공인 IP 를 넣어야 함).
+resource "aws_ec2_instance_connect_endpoint" "main" {
+  subnet_id          = aws_subnet.private1_2a.id
+  security_group_ids = [aws_security_group.eice.id]
+  preserve_client_ip = false
+
+  tags = {
+    Name = "petclinic-eice"
+  }
+}
