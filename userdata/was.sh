@@ -1,13 +1,12 @@
 #!/bin/bash
 # WAS 시작 템플릿 user data — 하이브리드 구성의 "설정·실행" 영역 (설치는 AMI: userdata/was-ami-build.sh).
 # 부팅 때 하는 일: /data 마운트 → Secrets Manager 에서 DB 자격증명 → S3 의 범용 WAR 배치 + DB 설정 주입 → Tomcat 시작
-#                 → CloudWatch Agent 설정을 SSM 에서 받아 실행. 빌드·설치가 없어 약 1분에 뜬다 → ASG 헬스체크 유예 120초.
+#                 → CloudWatch Agent 설정(인라인 JSON)으로 실행. 빌드·설치가 없어 약 1분에 뜬다 → ASG 헬스체크 유예 120초.
 set -uo pipefail
 exec > >(tee -a /var/log/mc-userdata.log) 2>&1
 
 REGION="ap-northeast-2"
 WAR_S3_URI="s3://petclinic-artifacts-723165663216/petclinic/petclinic.war"   # -P MySQL 로 빌드한 범용 WAR (자격증명은 아래서 덮어씀)
-CW_SSM_PARAM="AmazonCloudWatch-petclinic-was"                               # cloudwatch/agent-was.json 을 넣은 SSM 파라미터
 DB_SECRET_ID="petclinic/prod/db/app"                                        # 앱 전용 계정(petclinic_app) 시크릿. 이름으로 조회하므로 ARN 뒤 난수를 몰라도 된다.
 #    시크릿 키: username · password 필수, host · dbname 은 선택(있으면 아래서 그 값을 쓴다).
 # ⚠️ admin 시크릿(rds!db-…)은 쓰지 않는다 — RDS 가 관리해 7일마다 교체되고, 마스터 권한이 앱에 통째로 간다. admin 교체는 켜둔 채로 둔다(사람만 쓴다).
@@ -69,9 +68,82 @@ unset DB_SECRET DB_PASS
 # ---- 4. Tomcat ----
 systemctl enable --now tomcat
 
-# ---- 5. CloudWatch Agent — 설정은 SSM 파라미터에서 (이미지에 설치돼 있음) ----
-/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c "ssm:${CW_SSM_PARAM}" \
-  && echo "cwagent started from ssm:${CW_SSM_PARAM}" || echo "CWAGENT CONFIG FAILED"
+# ---- 5. CloudWatch Agent — 이미지에 설치돼 있음. 설정 JSON 인라인 (Parameter Store 미사용, 2026-09-21 결정) ----
+#   /data/logs/tomcat/catalina.out            → /petclinic/prod/was/tomcat/catalina (멀티라인: 날짜로 시작하는 줄이 새 이벤트)
+#   /data/logs/tomcat/localhost_access_log.*  → /petclinic/prod/was/tomcat/access
+#   /data/logs/tomcat/gc.log*                 → /petclinic/prod/was/jvm/gc
+#   /var/log/mc-userdata.log                  → /petclinic/prod/was/bootstrap
+# metrics: / 와 /data 디스크 사용률·메모리 → PetClinic/WAS
+cat > /opt/aws/amazon-cloudwatch-agent/etc/cw-was.json <<'JSON'
+{
+  "agent": {
+    "metrics_collection_interval": 60
+  },
+  "metrics": {
+    "namespace": "PetClinic/WAS",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}",
+      "AutoScalingGroupName": "${aws:AutoScalingGroupName}"
+    },
+    "metrics_collected": {
+      "disk": {
+        "resources": [
+          "/",
+          "/data"
+        ],
+        "measurement": [
+          "used_percent"
+        ],
+        "ignore_file_system_types": [
+          "sysfs",
+          "devtmpfs",
+          "tmpfs"
+        ]
+      },
+      "mem": {
+        "measurement": [
+          "mem_used_percent"
+        ]
+      }
+    }
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/data/logs/tomcat/catalina.out",
+            "log_group_name": "/petclinic/prod/was/tomcat/catalina",
+            "log_stream_name": "{instance_id}",
+            "timezone": "Local",
+            "multi_line_start_pattern": "^(\\d{2}-[A-Za-z]{3}-\\d{4}|\\d{4}-\\d{2}-\\d{2})"
+          },
+          {
+            "file_path": "/data/logs/tomcat/localhost_access_log.*.txt",
+            "log_group_name": "/petclinic/prod/was/tomcat/access",
+            "log_stream_name": "{instance_id}",
+            "timezone": "Local"
+          },
+          {
+            "file_path": "/data/logs/tomcat/gc.log*",
+            "log_group_name": "/petclinic/prod/was/jvm/gc",
+            "log_stream_name": "{instance_id}",
+            "timezone": "Local"
+          },
+          {
+            "file_path": "/var/log/mc-userdata.log",
+            "log_group_name": "/petclinic/prod/was/bootstrap",
+            "log_stream_name": "{instance_id}",
+            "timezone": "Local"
+          }
+        ]
+      }
+    }
+  }
+}
+JSON
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/cw-was.json \
+  && echo "cwagent started (inline config)" || echo "CWAGENT CONFIG FAILED"
 
 # ---- 6. 기동 확인 (tg-internal-alb 헬스체크 = /petclinic/ 200) ----
 for i in $(seq 1 18); do

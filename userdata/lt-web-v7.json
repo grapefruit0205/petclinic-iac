@@ -1,0 +1,40 @@
+{
+  "BlockDeviceMappings": [
+    {
+      "DeviceName": "/dev/xvda",
+      "Ebs": {
+        "VolumeSize": 30,
+        "VolumeType": "gp3",
+        "DeleteOnTermination": true
+      }
+    }
+  ],
+  "TagSpecifications": [
+    {
+      "ResourceType": "instance",
+      "Tags": [
+        {
+          "Key": "Name",
+          "Value": "ASG-Web"
+        },
+        {
+          "Key": "Tier",
+          "Value": "web"
+        }
+      ]
+    },
+    {
+      "ResourceType": "volume",
+      "Tags": [
+        {
+          "Key": "Name",
+          "Value": "web-root"
+        },
+        {
+          "Key": "Tier",
+          "Value": "web"
+        }
+      ]
+    }
+  ]
+}
