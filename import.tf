@@ -379,3 +379,46 @@ import {
   to = aws_route53_record.acm_validation
   id = "Z08667423LQZPT6BSL30W__4291571fd8079830c5cc27aed5766391.mission-critical.site_CNAME"
 }
+
+# --- ALB 액세스 로그 버킷 (2026-09-21 콘솔 생성) ---
+import {
+  to = aws_s3_bucket.alb_logs
+  id = "petclinic-log-alb"
+}
+import {
+  to = aws_s3_bucket_public_access_block.alb_logs
+  id = "petclinic-log-alb"
+}
+import {
+  to = aws_s3_bucket_policy.alb_logs
+  id = "petclinic-log-alb"
+}
+import {
+  to = aws_s3_bucket_lifecycle_configuration.alb_logs
+  id = "petclinic-log-alb"
+}
+
+# --- Public ALB 443 superheader 규칙 (2026-09-21 콘솔 생성) ---
+import {
+  to = aws_lb_listener_rule.public_https_superheader
+  id = "arn:aws:elasticloadbalancing:ap-northeast-2:723165663216:listener-rule/app/test-Public-ALB/2a2b6cc29a7f91ce/15e27bd1afbd16e3/543d092d738ecd1d"
+}
+
+# --- EC2 Instance Connect Endpoint + 전용 SG (2026-09-21 CLI 생성) ---
+import {
+  to = aws_security_group.eice
+  id = "sg-03faeb83650141825"
+}
+import {
+  to = aws_ec2_instance_connect_endpoint.main
+  id = "eice-0b79b9322b24ea55d"
+}
+# --- 정적 버킷 버전 관리 (2026-09-21) ---
+import {
+  to = aws_s3_bucket_versioning.static
+  id = "mc-static-image"
+}
+import {
+  to = aws_s3_bucket_lifecycle_configuration.static
+  id = "mc-static-image"
+}
