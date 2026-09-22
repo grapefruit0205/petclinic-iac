@@ -1,4 +1,4 @@
-# 컴퓨트 계층 — 골든 AMI, 시작 템플릿, ASG + 스케일링 정책, 단독 인스턴스 4대, WAS 데이터 볼륨.
+# 컴퓨트 계층 — 골든 AMI 3개(web·was v1·was v2), 시작 템플릿 2개, ASG 2개 + 스케일링 정책, 단독 인스턴스 6대, WAS 데이터 볼륨.
 # 키페어 `test-key` 는 퍼블릭 키를 API 로 못 읽어 import 할 수 없다 → 이름만 문자열로 쓴다.
 
 # web-ami 인스턴스(i-0c205c2e12ea8e389)에서 CreateImage 로 만든 골든 이미지. ASG 시작 템플릿 전 버전이 쓴다.
@@ -117,8 +117,178 @@ resource "aws_autoscaling_policy" "web_cpu" {
   }
 }
 
-# --- 단독 인스턴스 4대 ---
-# WAS. Tomcat 8080, tg-internal-alb 의 유일한 타깃 (SPOF). 프로파일 was-test-iam (AmazonRDSFullAccess).
+# 2026-09-21 콘솔 추가: Public ALB 타깃당 요청수 기반 단계 스케일 아웃. 트리거 알람은 monitoring.tf 의 web_reqcount_high.
+# 단계 = 알람 임계치(20000) 기준 초과분 0~15000 → +1대, 15000 이상 → +2대. 이름의 "cale-out" 은 콘솔에서 입력한 오타 그대로.
+# 스케일 인 정책은 없다 — 줄이는 건 CPU 목표 추적(web_cpu)이 맡는다.
+resource "aws_autoscaling_policy" "web_reqcount" {
+  name                    = "cale-out-web-reqcount-20000~35000"
+  autoscaling_group_name  = aws_autoscaling_group.web.name
+  policy_type             = "StepScaling"
+  adjustment_type         = "ChangeInCapacity"
+  metric_aggregation_type = "Average"
+
+  step_adjustment {
+    metric_interval_lower_bound = 0
+    metric_interval_upper_bound = 15000
+    scaling_adjustment          = 1
+  }
+  step_adjustment {
+    metric_interval_lower_bound = 15000
+    scaling_adjustment          = 2
+  }
+}
+
+# --- WAS 계층 ASG (2026-09-21 콘솔 생성, WAS 담당) ---
+# 골든 이미지: was-goldenImage 인스턴스(아래)에서 CreateImage. 루트 20GB 비암호화 — 암호화는 시작 템플릿에서 KMS 로 덧씌운다.
+resource "aws_ami" "was_golden" {
+  name                = "was-goldenImage-test"
+  architecture        = "x86_64"
+  virtualization_type = "hvm"
+  root_device_name    = "/dev/xvda"
+  ena_support         = true
+  sriov_net_support   = "simple"
+  boot_mode           = "uefi-preferred"
+  imds_support        = "v2.0"
+
+  ebs_block_device {
+    device_name           = "/dev/xvda"
+    snapshot_id           = "snap-07051adf4b3544465"
+    volume_size           = 20
+    volume_type           = "gp3"
+    iops                  = 3000
+    throughput            = 125
+    delete_on_termination = true
+    encrypted             = false
+  }
+}
+
+# 골든 이미지 v2 (2026-09-21 18:38 KST, semin): was-gg2 인스턴스(아래)에서 CreateImage. v1 과 같은 구성(루트 20GB 비암호화). 시작 템플릿 v2 가 쓴다.
+resource "aws_ami" "was_golden_v2" {
+  name                = "was-goldenImage-test-v2"
+  architecture        = "x86_64"
+  virtualization_type = "hvm"
+  root_device_name    = "/dev/xvda"
+  ena_support         = true
+  sriov_net_support   = "simple"
+  boot_mode           = "uefi-preferred"
+  imds_support        = "v2.0"
+
+  ebs_block_device {
+    device_name           = "/dev/xvda"
+    snapshot_id           = "snap-07a6743c7b1f78155"
+    volume_size           = 20
+    volume_type           = "gp3"
+    iops                  = 3000
+    throughput            = 125
+    delete_on_termination = true
+    encrypted             = false
+  }
+}
+
+# 시작 템플릿 was-lt. 실물은 latest=2, default=1 — ASG 는 $Latest 를 따라가므로 실제 뜨는 건 v2 다. 이 블록은 latest(v2) 의 내용.
+# v1 (17:20 KST): AMI was-goldenImage-test, 루트도 KMS 암호화, 설명 "was 웹서버 시작 템플릿".
+# v2 (18:42 KST, semin): AMI was-goldenImage-test-v2 로 교체, 루트 비암호화, /dev/sdf 처리량 미지정, 설명 없음. user data 는 v1 과 동일.
+# t3.medium, 프로파일 was-test-iam(RDS 만 — SSM·CloudWatch 정책 없음). user data 는 /dev/sdf 를 /data 로 마운트하고 Tomcat 기동.
+resource "aws_launch_template" "was" {
+  name            = "was-lt"
+  default_version = 1
+
+  image_id      = aws_ami.was_golden_v2.id
+  instance_type = "t3.medium"
+  key_name      = "test-key"
+  user_data     = base64encode(file("${path.module}/userdata/was-lt.sh"))
+
+  iam_instance_profile {
+    arn = aws_iam_instance_profile.was.arn
+  }
+
+  network_interfaces {
+    device_index    = 0
+    security_groups = [aws_security_group.was.id]
+  }
+
+  block_device_mappings {
+    device_name = "/dev/xvda"
+    ebs {
+      snapshot_id           = "snap-07a6743c7b1f78155" # = aws_ami.was_golden_v2 의 루트 스냅샷
+      volume_size           = 20
+      volume_type           = "gp3"
+      iops                  = 3000
+      throughput            = 125
+      delete_on_termination = true
+      encrypted             = false
+    }
+  }
+  block_device_mappings {
+    device_name = "/dev/sdf"
+    ebs {
+      volume_size           = 20
+      volume_type           = "gp3"
+      iops                  = 3000
+      delete_on_termination = true
+      encrypted             = true
+      kms_key_id            = "arn:aws:kms:ap-northeast-2:723165663216:key/fffaccce-417f-4d19-a593-dfd6214a8eb8"
+    }
+  }
+
+  # 콘솔은 KMS 키를 ARN 이 아니라 키 ID("fffaccce-…")로 저장했다. provider 는 ARN 만 받으므로 코드엔 ARN 을 쓰고,
+  # 그 표기 차이가 plan 에 "변경" 으로 잡히지 않게 무시한다 (같은 키).
+  lifecycle {
+    ignore_changes = [block_device_mappings[1].ebs[0].kms_key_id]
+  }
+}
+
+# WAS ASG. WAS 서브넷(private3/4) 2~4대, tg-internal-alb 에 등록. 시작 템플릿은 $Latest 를 따라간다(2026-09-21 18:43 KST
+# $Default → $Latest, semin; web-test 는 버전 고정). 18:46~18:52 KST 2대가 v2 로 교체됨. 그룹 지표(enabled_metrics)는 안 켜져 있다. 유예 300초.
+resource "aws_autoscaling_group" "was" {
+  name                = "was-asg"
+  min_size            = 2
+  max_size            = 4
+  desired_capacity    = 2
+  vpc_zone_identifier = [aws_subnet.private4_2c.id, aws_subnet.private3_2a.id]
+  target_group_arns   = [aws_lb_target_group.was.arn]
+
+  health_check_type         = "ELB"
+  health_check_grace_period = 300
+  default_cooldown          = 300
+
+  launch_template {
+    id      = aws_launch_template.was.id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "Name"
+    value               = "ASG-Was"
+    propagate_at_launch = true
+  }
+
+  # web 과 같은 이유 — Terraform 전용 인자 4개.
+  lifecycle {
+    ignore_changes = [force_delete, force_delete_warm_pool, ignore_failed_scaling_activities, wait_for_capacity_timeout]
+  }
+}
+
+# CPU 60% 목표 추적 (web 과 동일). 알람 TargetTracking-was-asg-AlarmHigh/Low 는 이 정책이 소유.
+resource "aws_autoscaling_policy" "was_cpu" {
+  name                      = "Target Tracking Policy"
+  autoscaling_group_name    = aws_autoscaling_group.was.name
+  policy_type               = "TargetTrackingScaling"
+  estimated_instance_warmup = 60
+
+  target_tracking_configuration {
+    target_value     = 60
+    disable_scale_in = false
+
+    predefined_metric_specification {
+      predefined_metric_type = "ASGAverageCPUUtilization"
+    }
+  }
+}
+
+# --- 단독 인스턴스 6대 ---
+# 옛 WAS(수제). Tomcat 8080. 2026-09-21 WAS ASG(was-asg) 로 대체되며 tg-internal-alb 에서 등록 해제 — 트래픽 안 받지만 아직 running.
+# 프로파일 was-test-iam (AmazonRDSFullAccess). 종료·중지는 WAS 담당 결정 (종료하면 이 블록 + was_data 볼륨 블록 삭제 + state rm).
 resource "aws_instance" "was_test_a" {
   ami                         = "ami-0fad23d064f9e8330"
   instance_type               = "t3.medium"
@@ -169,8 +339,8 @@ resource "aws_instance" "web_test_a" {
 }
 
 # 베스천. 퍼블릭 서브넷, 퍼블릭 IP 자동 할당(EIP 아님). 프로파일 없음. 2026-09-21 실측 running.
-# 운영 방침(2026-09-21 결정): 베스천 유지 + SSM(Session Manager) 병행. EC2 Instance Connect Endpoint(network.tf)는
-# 같은 날 추가된 부가 경로로, 정리 여부는 미정. 다음 손볼 것: mc-ec2-role 부착(SSM·로그), SG-bastion 22 를 팀원 IP 로 축소, EIP.
+# 운영 방침(2026-09-21 결정): 베스천 유지 + SSM(Session Manager) 병행. 같은 날 잠깐 있던 EC2 Instance Connect Endpoint 는
+# 저녁에 정리(코드·state 제거). 다음 손볼 것: mc-ec2-role 부착(SSM·로그), SG-bastion 22 를 팀원 IP 로 축소, EIP.
 resource "aws_instance" "bastion" {
   ami                         = "ami-0fad23d064f9e8330"
   instance_type               = "t3.micro"
@@ -230,7 +400,59 @@ resource "aws_instance" "web_ami" {
   }
 }
 
-# WAS 데이터 볼륨 — 계정에서 유일하게 암호화된 EBS (KMS 고객 키).
+# 골든 이미지 was-goldenImage-test 의 원본 (2026-09-20 AL2023 2023.12 로 생성, 09-21 17:01 KST CreateImage). 현재 중지됨.
+# 위치가 WAS 서브넷이 아니라 DB 서브넷(private5, 10.0.30.x) 이다 — 굽기 전용이라 실해는 없지만 다시 만들 땐 WAS 서브넷에.
+# CPU 크레딧 standard(다른 t3 는 전부 unlimited) — 시작 템플릿으로 뜨는 인스턴스와는 무관.
+resource "aws_instance" "was_golden_image" {
+  ami                         = "ami-03137ee2d0c5af1fe" # al2023-ami-2023.12.20260918.0-kernel-6.18-x86_64
+  instance_type               = "t3.medium"
+  subnet_id                   = aws_subnet.private5_2a.id
+  private_ip                  = "10.0.30.145"
+  associate_public_ip_address = false
+  vpc_security_group_ids      = [aws_security_group.was.id]
+  key_name                    = "test-key"
+  iam_instance_profile        = aws_iam_instance_profile.was.name
+  monitoring                  = false
+
+  root_block_device {
+    volume_size           = 20
+    volume_type           = "gp3"
+    delete_on_termination = true
+    encrypted             = false
+  }
+
+  tags = {
+    Name = "was-goldenImage"
+  }
+}
+
+# 골든 이미지 v2 의 원본 was-gg2 (2026-09-21 18:04 KST v1 AMI 로 생성 → 손본 뒤 18:38 CreateImage, semin). 20:58 다시 시작해 running —
+# 타깃 그룹엔 없으니 트래픽은 안 받는다(다음 골든 이미지 작업용으로 추정).
+# was-goldenImage 와 마찬가지로 DB 서브넷(private5, 10.0.30.x) 에 있다. 데이터 볼륨(/dev/sdf) 없이 루트만.
+resource "aws_instance" "was_gg2" {
+  ami                         = aws_ami.was_golden.id # was-goldenImage-test (v1)
+  instance_type               = "t3.medium"
+  subnet_id                   = aws_subnet.private5_2a.id
+  private_ip                  = "10.0.30.167"
+  associate_public_ip_address = false
+  vpc_security_group_ids      = [aws_security_group.was.id]
+  key_name                    = "test-key"
+  iam_instance_profile        = aws_iam_instance_profile.was.name
+  monitoring                  = false
+
+  root_block_device {
+    volume_size           = 20
+    volume_type           = "gp3"
+    delete_on_termination = true
+    encrypted             = false
+  }
+
+  tags = {
+    Name = "was-gg2"
+  }
+}
+
+# WAS 데이터 볼륨 — WAS-test-a 의 /dev/sdf (KMS 고객 키 암호화). ASG 인스턴스는 시작 템플릿의 두 번째 BDM 이 같은 키로 따로 만든다.
 resource "aws_ebs_volume" "was_data" {
   availability_zone = "ap-northeast-2a"
   size              = 20

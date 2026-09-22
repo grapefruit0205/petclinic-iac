@@ -105,15 +105,6 @@ output "rds_instance" {
   }
 }
 
-output "rds_proxy" {
-  description = "RDS Proxy endpoint and engine family"
-  value = {
-    name     = data.aws_db_proxy.main.name
-    endpoint = data.aws_db_proxy.main.endpoint
-    engine   = data.aws_db_proxy.main.engine_family
-  }
-}
-
 output "db_subnet_group" {
   description = "DB subnet group name and its subnets"
   value = {
@@ -123,12 +114,11 @@ output "db_subnet_group" {
 }
 
 output "network_extras" {
-  description = "Internet gateway, NAT gateways, route tables, VPC endpoint"
+  description = "Internet gateway, NAT gateways, route tables"
   value = {
     internet_gateway = data.aws_internet_gateway.main.id
     nat_gateways     = { for id, ng in data.aws_nat_gateway.named : id => ng.public_ip }
     route_tables     = { for id, rt in data.aws_route_table.named : id => rt.id }
-    vpc_endpoint     = data.aws_vpc_endpoint.main.id
   }
 }
 

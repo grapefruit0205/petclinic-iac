@@ -275,3 +275,76 @@ resource "aws_route53_record" "acm_validation" {
   ttl     = 300
   records = ["_55ba0c9baa25f1d0cce6c3cf7a8f0c22.wzccmgtwzk.acm-validations.aws."]
 }
+
+# --- 엣지 관측 (2026-09-21 오후·저녁 콘솔, yena) ---
+# WAF 로깅: web ACL → S3 aws-waf-logs-petclinic-block. 쿼리스트링과 superheader 값은 로그에서 마스킹.
+# 필터 = BLOCK 된 요청만 저장(기본 DROP) — 관리형 룰 3개가 Count 라 실제로 남는 건 SQLi 룰 차단뿐. 15:42~15:44 KST.
+resource "aws_wafv2_web_acl_logging_configuration" "cloudfront" {
+  provider                = aws.us_east_1
+  resource_arn            = aws_wafv2_web_acl.cloudfront.arn
+  log_destination_configs = [aws_s3_bucket.waf_logs.arn]
+
+  redacted_fields {
+    query_string {}
+  }
+  redacted_fields {
+    single_header {
+      name = "superheader"
+    }
+  }
+
+  logging_filter {
+    default_behavior = "DROP"
+
+    filter {
+      behavior    = "KEEP"
+      requirement = "MEETS_ALL"
+
+      condition {
+        action_condition {
+          action = "BLOCK"
+        }
+      }
+    }
+  }
+}
+
+# CloudFront 표준 로그 v2 — 배포 설정(logging_config)이 아니라 CloudWatch Logs "전송(delivery)" 3종으로 구성된다 (us-east-1).
+# 소스 = 배포의 ACCESS_LOGS, 목적지 = S3 mc-logs-petclinic/petclinic, 전송 = 필드 33개 · JSON · Hive 경로
+# `petclinic/prod/edge/cloudfront/access/year=/month=/day=/hour=`. 18:06 생성 → 18:28 목적지 교체 → 18:31 확정. 이름들은 콘솔 자동 생성.
+resource "aws_cloudwatch_log_delivery_source" "cloudfront_access" {
+  provider     = aws.us_east_1
+  name         = "CreatedByCloudFront-E1F6M0QDUUT8AG-ACCESS_LOGS"
+  log_type     = "ACCESS_LOGS"
+  resource_arn = aws_cloudfront_distribution.main.arn
+}
+
+resource "aws_cloudwatch_log_delivery_destination" "cloudfront_access" {
+  provider      = aws.us_east_1
+  name          = "CF-E1F6M0QDUUT8AG-mc-logs-petclinic-petclinic-1789982984026"
+  output_format = "json"
+
+  delivery_destination_configuration {
+    destination_resource_arn = "${aws_s3_bucket.central_logs.arn}/petclinic"
+  }
+}
+
+resource "aws_cloudwatch_log_delivery" "cloudfront_access" {
+  provider                 = aws.us_east_1
+  delivery_source_name     = aws_cloudwatch_log_delivery_source.cloudfront_access.name
+  delivery_destination_arn = aws_cloudwatch_log_delivery_destination.cloudfront_access.arn
+
+  record_fields = [
+    "date", "time", "x-edge-location", "sc-bytes", "c-ip", "cs-method", "cs(Host)", "cs-uri-stem", "sc-status",
+    "cs(Referer)", "cs(User-Agent)", "cs-uri-query", "cs(Cookie)", "x-edge-result-type", "x-edge-request-id",
+    "x-host-header", "cs-protocol", "cs-bytes", "time-taken", "x-forwarded-for", "ssl-protocol", "ssl-cipher",
+    "x-edge-response-result-type", "cs-protocol-version", "fle-status", "fle-encrypted-fields", "c-port",
+    "time-to-first-byte", "x-edge-detailed-result-type", "sc-content-type", "sc-content-len", "sc-range-start",
+    "sc-range-end",
+  ]
+
+  s3_delivery_configuration = [{
+    suffix_path                 = "prod/edge/cloudfront/access/{yyyy}/{MM}/{dd}/{HH}"
+    enable_hive_compatible_path = true
+  }]
+}

@@ -1,4 +1,6 @@
-# 데이터 계층 — RDS MySQL(Multi-AZ) + RDS Proxy.
+# 데이터 계층 — RDS MySQL(Multi-AZ).
+# RDS Proxy pet-proxy 는 아무도 안 써서(ClientConnections 0) 2026-09-22 08:55 KST 삭제 (CLI, kdt5).
+# 프록시가 쓰던 IAM 역할·정책·로그 그룹도 같은 날 09:00 KST 삭제 완료 — 코드에 흔적 없음.
 # 마스터 비밀번호는 RDS 관리형 시크릿(rds!db-…)이다. provider 는 import 시 manage_master_user_password 를
 # 읽지 않으므로 코드에 넣으면 plan 에 변경으로 잡힌다 — 그래서 비워 둔다. 시크릿 ARN 은 master_user_secret 로 참조.
 
@@ -80,38 +82,4 @@ resource "aws_db_instance" "main" {
   lifecycle {
     prevent_destroy = true
   }
-}
-
-resource "aws_db_proxy" "main" {
-  name                   = "pet-proxy"
-  engine_family          = "MYSQL"
-  role_arn               = aws_iam_role.rds_proxy.arn
-  vpc_subnet_ids         = [aws_subnet.private5_2a.id, aws_subnet.private6_2c.id]
-  vpc_security_group_ids = [aws_security_group.db.id]
-  require_tls            = false
-  idle_client_timeout    = 28800
-  debug_logging          = false
-
-  auth {
-    auth_scheme               = "SECRETS"
-    iam_auth                  = "DISABLED"
-    client_password_auth_type = "MYSQL_CACHING_SHA2_PASSWORD"
-    secret_arn                = aws_db_instance.main.master_user_secret[0].secret_arn
-  }
-}
-
-resource "aws_db_proxy_default_target_group" "main" {
-  db_proxy_name = aws_db_proxy.main.name
-
-  connection_pool_config {
-    max_connections_percent      = 90
-    max_idle_connections_percent = 90
-    connection_borrow_timeout    = 120
-  }
-}
-
-resource "aws_db_proxy_target" "main" {
-  db_proxy_name          = aws_db_proxy.main.name
-  target_group_name      = aws_db_proxy_default_target_group.main.name
-  db_instance_identifier = aws_db_instance.main.identifier
 }

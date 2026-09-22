@@ -51,12 +51,6 @@ variable "route_table_ids" {
   ]
 }
 
-variable "vpc_endpoint_id" {
-  description = "VPC endpoint ID"
-  type        = string
-  default     = "vpce-0bc81ff97ecbceb74"
-}
-
 # --- 진입 계층 ---
 variable "alb_names" {
   description = "Load balancer names (public, internal)"
@@ -94,7 +88,6 @@ variable "security_group_names" {
   type        = list(string)
   default = [
     "SG-bastion",
-    "eice-sg",
     "alb-internal-sg",
     "alb-public-sg",
     "was-instance-sg",
@@ -123,12 +116,6 @@ variable "db_identifier" {
   default     = "database-1"
 }
 
-variable "db_proxy_name" {
-  description = "RDS Proxy name"
-  type        = string
-  default     = "pet-proxy"
-}
-
 variable "db_subnet_group_name" {
   description = "DB subnet group name"
   type        = string
@@ -147,7 +134,6 @@ variable "log_group_names" {
   type        = list(string)
   default = [
     "/aws/rds/instance/database-1/error",
-    "/aws/rds/proxy/pet-proxy",
     "/aws/rds/instance/database-1/slowquery",
     "/petclinic/web/access",
     "/petclinic/web/error",
