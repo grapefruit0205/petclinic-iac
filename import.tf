@@ -239,20 +239,12 @@ import {
   id = "rds-monitoring-role"
 }
 import {
-  to = aws_iam_role.rds_proxy
-  id = "rds-proxy-role-1789628580044"
-}
-import {
   to = aws_iam_instance_profile.ec2
   id = "mc-ec2-role"
 }
 import {
   to = aws_iam_instance_profile.was
   id = "was-test-iam"
-}
-import {
-  to = aws_iam_policy.rds_proxy
-  id = "arn:aws:iam::723165663216:policy/service-role/rds-proxy-policy-1789628580044"
 }
 import {
   to = aws_iam_role_policy_attachment.ec2_cloudwatch
@@ -270,10 +262,6 @@ import {
   to = aws_iam_role_policy_attachment.rds_monitoring
   id = "rds-monitoring-role/arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
-import {
-  to = aws_iam_role_policy_attachment.rds_proxy
-  id = "rds-proxy-role-1789628580044/arn:aws:iam::723165663216:policy/service-role/rds-proxy-policy-1789628580044"
-}
 
 # --- 데이터 계층 ---
 import {
@@ -287,18 +275,6 @@ import {
 import {
   to = aws_db_instance.main
   id = "database-1"
-}
-import {
-  to = aws_db_proxy.main
-  id = "pet-proxy"
-}
-import {
-  to = aws_db_proxy_default_target_group.main
-  id = "pet-proxy"
-}
-import {
-  to = aws_db_proxy_target.main
-  id = "pet-proxy/default/RDS_INSTANCE/database-1"
 }
 
 # --- 스토리지 · 로그 ---
@@ -333,10 +309,6 @@ import {
 import {
   to = aws_cloudwatch_log_group.rds_slowquery
   id = "/aws/rds/instance/database-1/slowquery"
-}
-import {
-  to = aws_cloudwatch_log_group.rds_proxy
-  id = "/aws/rds/proxy/pet-proxy"
 }
 
 # --- 엣지 계층 ---
@@ -404,15 +376,6 @@ import {
   id = "arn:aws:elasticloadbalancing:ap-northeast-2:723165663216:listener-rule/app/test-Public-ALB/2a2b6cc29a7f91ce/15e27bd1afbd16e3/543d092d738ecd1d"
 }
 
-# --- EC2 Instance Connect Endpoint + 전용 SG (2026-09-21 CLI 생성) ---
-import {
-  to = aws_security_group.eice
-  id = "sg-03faeb83650141825"
-}
-import {
-  to = aws_ec2_instance_connect_endpoint.main
-  id = "eice-0b79b9322b24ea55d"
-}
 # --- 정적 버킷 버전 관리 (2026-09-21) ---
 import {
   to = aws_s3_bucket_versioning.static
@@ -421,4 +384,105 @@ import {
 import {
   to = aws_s3_bucket_lifecycle_configuration.static
   id = "mc-static-image"
+}
+
+# --- 2026-09-21 오후 콘솔 신규 (WAS ASG · WEB 요청수 스케일링 · SNS · 로그/WAF 버킷 · WAS 골든 AMI) ---
+import {
+  to = aws_launch_template.was
+  id = "lt-03b9d84a0bb5d70d0"
+}
+import {
+  to = aws_autoscaling_group.was
+  id = "was-asg"
+}
+import {
+  to = aws_autoscaling_policy.was_cpu
+  id = "was-asg/Target Tracking Policy"
+}
+import {
+  to = aws_autoscaling_policy.web_reqcount
+  id = "web-test/cale-out-web-reqcount-20000~35000"
+}
+import {
+  to = aws_cloudwatch_metric_alarm.web_reqcount_high
+  id = "alarm-web-reqcount-high-20000"
+}
+import {
+  to = aws_sns_topic.alerts
+  id = "arn:aws:sns:ap-northeast-2:723165663216:mc-alerts"
+}
+import {
+  to = aws_sns_topic_subscription.alerts_email
+  id = "arn:aws:sns:ap-northeast-2:723165663216:mc-alerts:ea44ca0d-47cf-47df-99e8-bb7476bcc7fc"
+}
+import {
+  to = aws_ami.was_golden
+  id = "ami-0bd669bb5ad494b67"
+}
+import {
+  to = aws_instance.was_golden_image
+  id = "i-09889af7ae933ba63"
+}
+import {
+  to = aws_s3_bucket.central_logs
+  id = "mc-logs-petclinic"
+}
+import {
+  to = aws_s3_bucket_public_access_block.central_logs
+  id = "mc-logs-petclinic"
+}
+import {
+  provider = aws.us_east_1
+  to       = aws_s3_bucket.waf_logs
+  id       = "aws-waf-logs-petclinic-block"
+}
+import {
+  provider = aws.us_east_1
+  to       = aws_s3_bucket_public_access_block.waf_logs
+  id       = "aws-waf-logs-petclinic-block"
+}
+
+# --- 2026-09-21 저녁 콘솔 신규 (WAS 골든 AMI v2 + 그 원본 인스턴스 was-gg2, semin) ---
+import {
+  to = aws_ami.was_golden_v2
+  id = "ami-037c4fd127e1d9ac6"
+}
+import {
+  to = aws_instance.was_gg2
+  id = "i-0ea1eacda1a151ed9"
+}
+
+# --- 2026-09-21 오후·저녁 콘솔 신규 (관측: WAF 로깅 · CloudFront 표준 로그 v2 · 버킷 정책 2 · WAS 시크릿 읽기 정책) ---
+import {
+  provider = aws.us_east_1
+  to       = aws_wafv2_web_acl_logging_configuration.cloudfront
+  id       = "arn:aws:wafv2:us-east-1:723165663216:global/webacl/CreatedByCloudFront-2407cc5b/3cc6a3dd-01f6-423b-a815-cd441599ef03"
+}
+import {
+  provider = aws.us_east_1
+  to       = aws_s3_bucket_policy.waf_logs
+  id       = "aws-waf-logs-petclinic-block"
+}
+import {
+  provider = aws.us_east_1
+  to       = aws_cloudwatch_log_delivery_source.cloudfront_access
+  id       = "CreatedByCloudFront-E1F6M0QDUUT8AG-ACCESS_LOGS"
+}
+import {
+  provider = aws.us_east_1
+  to       = aws_cloudwatch_log_delivery_destination.cloudfront_access
+  id       = "CF-E1F6M0QDUUT8AG-mc-logs-petclinic-petclinic-1789982984026"
+}
+import {
+  provider = aws.us_east_1
+  to       = aws_cloudwatch_log_delivery.cloudfront_access
+  id       = "iVLg9LM2vvA0sUrm"
+}
+import {
+  to = aws_s3_bucket_policy.central_logs
+  id = "mc-logs-petclinic"
+}
+import {
+  to = aws_iam_role_policy.was_read_rds_secret
+  id = "was-test-iam:PetclinicReadRdsSecret"
 }

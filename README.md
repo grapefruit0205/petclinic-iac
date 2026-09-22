@@ -5,7 +5,7 @@
 | 층 | 파일 | 역할 |
 |---|---|---|
 | 조회 | `data.tf` · `outputs.tf` · `variables.tf` | 실물을 읽어 출력한다. 아무것도 소유하지 않는다. |
-| 소유(import) | `network.tf` · `security.tf` · `entry.tf` · `compute.tf` · `iam.tf` · `database.tf` · `storage.tf` · `edge.tf` + `import.tf` | 실물 87개에 대응하는 `resource` 블록과, 그것을 실물에 연결하는 `import` 블록 |
+| 소유(import) | `network.tf` · `security.tf` · `entry.tf` · `compute.tf` · `iam.tf` · `database.tf` · `storage.tf` · `edge.tf` · `monitoring.tf` + `import.tf` | 실물 87개에 대응하는 `resource` 블록과, 그것을 실물에 연결하는 `import` 블록 |
 
 **2026-09-19 20:01 KST 에 import apply 를 1회 실행했습니다** — `Apply complete! Resources: 87 imported, 0 added, 0 changed, 0 destroyed.`
 그 결과 로컬 `terraform.tfstate`(git 무시)에 리소스 87개가 기록돼 있고, 이 시점의 코드는 실물과 정확히 일치합니다.
@@ -45,14 +45,15 @@ state 가 있으므로 이제 `terraform plan` 은 **코드(2026-09-19 스냅샷
 
 | 계층 | 파일 | 리소스 |
 |---|---|---|
-| 네트워크 | `network.tf` | VPC, 서브넷 8, IGW, NAT 2 + EIP 2, 라우트 테이블 5 + 기본 테이블, 연결 8, EC2 Instance Connect Endpoint 1 (2026-09-21 추가 — 베스천은 유지, 부가 경로) |
-| 보안 | `security.tf` | 보안 그룹 7 (규칙 인라인; `eice-sg` 는 2026-09-21 추가) |
+| 네트워크 | `network.tf` | VPC, 서브넷 8, IGW, NAT 2 + EIP 2, 라우트 테이블 5 + 기본 테이블, 연결 8 (EC2 Instance Connect Endpoint 는 2026-09-21 저녁 정리 — 코드·state 제거) |
+| 보안 | `security.tf` | 보안 그룹 6 (규칙 인라인; `eice-sg` 는 2026-09-21 저녁 정리). `alb-public-sg` 443 은 CloudFront 프리픽스 리스트만 허용 |
 | 진입 | `entry.tf` | ALB 2, 타깃 그룹 2, 리스너 3 (443 ACM · 80 · internal 80), 443 `superheader` 리스너 규칙, ALB 인증서 |
-| 컴퓨트 | `compute.tf` | 골든 AMI `web-appache`, 시작 템플릿 `web`, ASG `web-test` + CPU 60% 목표추적 정책, 단독 인스턴스 4, WAS 데이터 볼륨 + 연결 |
-| IAM | `iam.tf` | 역할 4 (`mc-ec2-role` · `was-test-iam` · `rds-monitoring-role` · RDS Proxy 역할), 프로파일 2, 고객 정책 1, 정책 연결 5 |
-| 데이터 | `database.tf` | RDS `database-1`, 파라미터 그룹, 서브넷 그룹, RDS Proxy + 기본 타깃 그룹 + 타깃 |
-| 스토리지·로그 | `storage.tf` | S3 `mc-static-image` + 정책 · 퍼블릭 차단 · 암호화, ALB 로그 버킷 `petclinic-log-alb` + 정책 · 퍼블릭 차단 · 수명주기(90일), 로그 그룹 5 |
-| 엣지 | `edge.tf` | CloudFront 분포 + OAC + Function(`petclinic-home-to-landing`, 코드는 `cloudfront/`), WAF 웹 ACL, CloudFront 인증서, Route53 존 + 레코드 3 (A · AAAA · ACM 검증) |
+| 컴퓨트 | `compute.tf` | 골든 AMI `web-appache` · `was-goldenImage-test` · `was-goldenImage-test-v2`, 시작 템플릿 `web` · `was-lt`(latest v2, default 1), ASG `web-test`(CPU 60% 목표추적 + 요청수 단계 정책) · `was-asg`(CPU 60%, `$Latest`), 단독 인스턴스 6(골든 이미지 원본 `was-goldenImage`·`was-gg2` 포함), WAS 데이터 볼륨 + 연결 |
+| IAM | `iam.tf` | 역할 3 (`mc-ec2-role` · `was-test-iam` · `rds-monitoring-role`), 프로파일 2, 정책 연결 4, 인라인 정책 1 (`was-test-iam` 의 `PetclinicReadRdsSecret`) |
+| 데이터 | `database.tf` | RDS `database-1`, 파라미터 그룹, 서브넷 그룹 (RDS Proxy 는 2026-09-22 제거 결정 — 코드·state 에서 뺌) |
+| 스토리지·로그 | `storage.tf` | S3 `mc-static-image` + 정책 · 퍼블릭 차단 · 암호화 · 버전 관리, ALB 로그 버킷 `petclinic-log-alb` + 정책 · 퍼블릭 차단 · 수명주기(90일), 중앙 로그 버킷 `mc-logs-petclinic` + 정책(CloudFront 로그 전송용), WAF 로그 버킷 `aws-waf-logs-petclinic-block`(us-east-1) + 정책, 로그 그룹 4 |
+| 모니터링 | `monitoring.tf` | SNS 토픽 `mc-alerts` + 이메일 구독, 알람 `alarm-web-reqcount-high-20000` (Public ALB 타깃당 요청수 → web 단계 정책 + 메일) |
+| 엣지 | `edge.tf` | CloudFront 분포 + OAC + Function(`petclinic-home-to-landing`, 코드는 `cloudfront/`), WAF 웹 ACL + 로깅 설정(S3, BLOCK 만), CloudFront 표준 로그 v2 전송 3종(소스·목적지·전송, us-east-1), CloudFront 인증서, Route53 존 + 레코드 3 (A · AAAA · ACM 검증) |
 
 시작 템플릿(v6)과 `web-ami` 인스턴스의 user data 는 `userdata/` 에, CloudFront Function 코드는 `cloudfront/` 에 원문 그대로 있습니다. **바이트가 바뀌면 plan 에 변경으로 잡히니** 손대지 마세요 — 바꾸려면 콘솔에서 새 버전/게시를 만들고 그 원문을 다시 복사합니다.
 
@@ -60,9 +61,7 @@ state 가 있으므로 이제 `terraform plan` 은 **코드(2026-09-19 스냅샷
 
 | 리소스 | 이유 |
 |---|---|
-| `tg-internal-alb` ← `WAS-test-a` 수동 타깃 등록 | `aws_lb_target_group_attachment` 가 import 미지원 (`WEB-test-a` 는 2026-09-19 21:45 KST 등록 해제됨) |
 | 키페어 `test-key` | 퍼블릭 키를 API 로 못 읽어 import 불가. 이름만 문자열로 참조 |
-| VPC 엔드포인트 `vpce-0bc81ff97ecbceb74` | RDS Proxy 가 만든 AWS 관리 엔드포인트 — 사용자 리소스가 아님 |
 | Public ALB 의 EIP 2개 (`52.78.70.34` · `3.38.76.227`) | ELB 가 관리 |
 | RDS 관리형 시크릿 `rds!db-…` | RDS 가 소유. `aws_db_instance.main.master_user_secret` 로 참조 |
 | 알람 `TargetTracking-web-test-AlarmHigh/Low` | 목표추적 정책이 소유 |
@@ -87,9 +86,9 @@ Route53 24petclinic.mission-critical.site (A/AAAA alias)
       └ /petclinic/*           → Public ALB :443 (CachingDisabled + AllViewer, https-only, Host 헤더 전달)
               → Targetgroup-web :80 = ASG web-test 2대(t3.small) + WEB-test-a
                   httpd 리버스프록시 /petclinic/ → Internal ALB :80
-                      → tg-internal-alb :8080 = WAS-test-a (Tomcat 9.0.121 · Corretto 8, 1대)
+                      → tg-internal-alb :8080 = ASG was-asg (was-lt v1 · t3.medium ×2~4, 2026-09-21) — 옛 WAS-test-a 는 등록 해제(아직 running)
                           → RDS database-1 직결 (MySQL 8.0.44, db.t3.small, Multi-AZ, 200GB)
-                            ※ RDS Proxy pet-proxy 는 만들어져 있지만 아무도 안 씀 (ClientConnections 0)
+                            ※ RDS Proxy pet-proxy 는 아무도 안 써서(ClientConnections 0) 2026-09-22 삭제
 ```
 
 랜딩(`/`)은 WEB 파트가 S3 로 배포하고, 버튼(보호자 찾기·등록, 수의사)만 WAS 의 기능 페이지로 간다. WAS 의 옛 홈(`/petclinic/`)은 링크하지 않는다.
@@ -103,12 +102,12 @@ Route53 24petclinic.mission-critical.site (A/AAAA alias)
   - ALB 오리진에 커스텀 헤더 `superheader` 가 붙고, **Public ALB 443 리스너가 이를 검사한다** (2026-09-21: 기본 동작 403 고정 응답 + 우선순위 1 규칙 `superheader` 일치 시 forward, `entry.tf` `aws_lb_listener_rule.public_https_superheader`).
   - WAF `CreatedByCloudFront-2407cc5b`: 관리형 룰 3개 전부 **Count** — 차단하지 않는다. 로깅 없음.
   - ACM `*.mission-critical.site` 2장 (ap-northeast-2 = ALB, us-east-1 = CloudFront), DNS 검증, 2027-04 만료.
-- **진입** — Public ALB 리스너 443(ACM, `TLS13-1-2-Res-PQ-2025-09`) + **80 은 리다이렉트가 아니라 forward**. `alb-public-sg` 는 여전히 80·443 전체 개방이지만, **웹 계층 httpd 가 CloudFront 커스텀 헤더(`superheader`)를 검사해 직접 접근은 403** (시작 템플릿 v6, 2026-09-19 21:40 KST). SG 자체를 CloudFront prefix list 로 좁히는 건 다음 단계.
-  - `Targetgroup-web` 타깃 = ASG 2대뿐 (`WEB-test-a` 는 21:45 KST 등록 해제). `tg-internal-alb` 는 `WAS-test-a` 1대뿐 (SPOF).
+- **진입** — Public ALB 리스너 443(ACM, `TLS13-1-2-Res-PQ-2025-09`) + 80 은 443 으로 301 (2026-09-21). 직접 접근 차단 3겹: **`alb-public-sg` 443 이 CloudFront 프리픽스 리스트만 허용**(2026-09-21 20:59 yena — ALB 주소 직접 호출은 TCP 타임아웃) → 443 리스너 `superheader` 규칙 → 웹 httpd `superheader` 검사(v6). ⚠️ 같은 SG 에 "22 ← 베스천" 규칙이 있는데 ALB 는 22 를 안 듣는다 — 의도 확인.
+  - `Targetgroup-web` 타깃 = ASG 2대뿐 (`WEB-test-a` 는 21:45 KST 등록 해제). `tg-internal-alb` 타깃 = ASG `was-asg` 2대 (2026-09-21, `WAS-test-a` 등록 해제 — SPOF 해소; 18:46~18:52 KST 시작 템플릿 v2 = AMI v2 로 교체, ASG 는 `$Latest`). ⚠️ `was-asg` 프로파일 `was-test-iam` 엔 SSM·CloudWatch 정책이 없어 WAS 로그는 아직 안 올라간다.
 - **컴퓨트** — ASG `web-test` (min 2 · max 4 · desired 2, 시작 템플릿 `web` **v6 고정**, ELB 헬스체크, CPU 60% 목표추적).
   - 시작 템플릿 v6 = v5(`t3.small`) + user data 에 `superheader` 검사(`/health.html` 예외). default_version 도 6 (2026-09-20 콘솔에서 4→6 — 버전 미지정 시 구버전 t2.small 이 뜨던 함정 해소). 인스턴스 리프레시 `cfe16cb8`(9/19 21:40~21:52 KST)로 2대 교체 완료.
   - 전 버전이 골든 AMI `web-appache`(`ami-081f6180df874677d`, 9/15 `web-ami` 인스턴스에서 CreateImage)를 쓴다. v6 부터 설정은 user data 에 있어 AMI 를 다시 굽는 일은 패키지 갱신 때만.
-  - 단독: `WAS-test-a`(10.0.20.235, 프로파일 `was-test-iam`) · `WEB-test-a`(10.0.10.51, **중지됨**, `mc-ec2-role` 부착, 타깃 해제 — WEB 계층 실험용) · `bas-server`(10.0.0.196, 퍼블릭 IP, 프로파일 없음) · `web-ami`(10.0.0.133, t2.medium, `mc-ec2-role`, **중지됨** — 골든 AMI `web-appache` 의 원본, 역할 종료).
+  - 단독: `WAS-test-a`(10.0.20.235, 프로파일 `was-test-iam`, 타깃 해제됐지만 running) · `was-goldenImage`(10.0.30.145, DB 서브넷, **중지됨** — 골든 AMI `was-goldenImage-test` 의 원본) · `was-gg2`(10.0.30.167, DB 서브넷, **running** — 골든 AMI `was-goldenImage-test-v2` 의 원본, 9/21 20:58 재시작) · `WEB-test-a`(10.0.10.51, **중지됨**, `mc-ec2-role` 부착, 타깃 해제 — WEB 계층 실험용) · `bas-server`(10.0.0.196, 퍼블릭 IP, 프로파일 없음) · `web-ami`(10.0.0.133, t2.medium, `mc-ec2-role`, **중지됨** — 골든 AMI `web-appache` 의 원본, 역할 종료).
   - **WAS-test-a 실측 (SSH, 2026-09-19)** — user data 없이 **수동 설치**. AL2023 · Corretto **1.8.0_504**(JDK devel 포함) · Tomcat **9.0.121** `/opt/tomcat`, systemd `tomcat.service`(User=tomcat, `-Xms512m -Xmx1024m`, 힙덤프 `/data/dump`) · 포트 8080(HTTP), 8005(shutdown, localhost).
     - `/data` = 추가 20GB 암호화 볼륨(`/dev/sdf`): `logs/tomcat`(`/opt/tomcat/logs` 심볼릭 링크) · `dump` · `temp`.
     - 앱은 `/opt/tomcat/webapps/petclinic.war`(42.7MB, 9/16 10:19 복사, Tomcat 자동 배포). 서버에 소스 없음 → **밖에서 빌드해 WAR 만 복사**하는 방식. `-P MySQL` 로 빌드되어 `jdbc:mysql://database-1.c6vk…:3306/petclinic` **직결**, 사용자 `admin`(RDS 마스터).
@@ -118,12 +117,12 @@ Route53 24petclinic.mission-critical.site (A/AAAA alias)
 - **보안 그룹** — `web-instance-sg` 는 `0.0.0.0/0` 규칙 없음. ⚠️ `SG-bastion` 은 **22·80·443** 을, `was-instance-sg` 는 **80·443·8080** 을 `0.0.0.0/0` 에 개방 (WAS 는 프라이빗 서브넷이라 VPC 안에서만 닿는다).
 - **IAM** — `mc-ec2-role` = `CloudWatchAgentServerPolicy` + `AmazonSSMManagedInstanceCore`. ⚠️ `was-test-iam` = `AmazonRDSFullAccess` (과잉). `rds-monitoring-role` 은 만들어져 있지만 미사용.
 - **데이터** — RDS `mysql 8.0.44` · `db.t3.small` · Multi-AZ · gp3 200GB(최대 1000) · 암호화 · 파라미터 그룹 `petclinic-mysql-log`(슬로우 쿼리 2초). ⚠️ **자동 백업 0일, 수동 스냅샷 0개.** 향상된 모니터링·PI 꺼짐.
-  - RDS Proxy: Secrets Manager 인증, IAM 인증 꺼짐, `RequireTLS=false`. **그러나 WAS 는 프록시를 거치지 않고 RDS 에 직결** (CloudWatch `ClientConnections` 0, WAR 의 `jdbc.url` 이 인스턴스 엔드포인트).
+  - RDS Proxy `pet-proxy`: WAS 가 프록시를 거치지 않고 RDS 에 직결(`ClientConnections` 0)해 **2026-09-22 08:55 KST 삭제** (역할 `rds-proxy-role-…`·정책·로그 그룹 `/aws/rds/proxy/pet-proxy` 도 09:00 같이 삭제). 코드·state 에 흔적 없음.
   - ⚠️ WAR 에 박힌 `admin` 비밀번호는 RDS 관리형 시크릿이라 **자동 교체가 켜져 있다** — 교체되는 순간 앱 DB 접속이 끊긴다. 전용 앱 사용자 + 교체 없는 시크릿으로 바꿔야 한다.
 - **스토리지** — 버킷은 `mc-static-image` 하나뿐 → ALB·CloudFront 로그 버킷 없음. ALB 2대 모두 액세스 로깅 꺼짐.
   - 버킷 구조 (2026-09-19 21:10 KST): 루트에 랜딩(`index.html` · `css/mc-site.css` · `images/hero-poster.jpg` · `images/hero/hero.mp4`), `petclinic/resources/{css,fonts,images,js}` 에 WAR 페이지용 정적 파일 22개. 원본은 `middleproject` 의 `docs/site-static/` 과 `src/main/webapp/resources/`(`less/` 제외).
   - 정적 파일을 바꾸면 S3 업로드 + CloudFront 무효화(`/*` 또는 바뀐 경로). 무효화 안 하면 하루(CachingOptimized 기본 TTL) 동안 옛것이 보인다.
-- **로그** — 로그 그룹 5개. `/petclinic/web/access`(30일) · `/petclinic/web/error`(90일), RDS 쪽 3개는 보존기간 없음. `audit` 내보내기가 켜져 있지만 옵션 그룹에 플러그인이 없어 로그 그룹이 생기지 않는다.
+- **로그** — 로그 그룹 4개. `/petclinic/web/access`(30일) · `/petclinic/web/error`(90일), RDS 쪽 2개는 보존기간 없음. `audit` 내보내기가 켜져 있지만 옵션 그룹에 플러그인이 없어 로그 그룹이 생기지 않는다.
 - **알림** — SNS 토픽 없음, 알람은 목표추적용 2개뿐, 리전 CloudTrail 없음.
 
 ## 범위 밖
