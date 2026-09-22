@@ -78,9 +78,9 @@ variable "launch_template_name" {
 }
 
 variable "instance_names" {
-  description = "Name tags of running standalone instances (ASG members are covered by the ASG lookup). WEB-test-a · web-ami(2026-09-19) 는 중지돼 조회 목록에서 뺐다 — resource 로는 compute.tf 에서 계속 소유한다. bas-server 는 유지(running)"
+  description = "Name tags of running standalone instances (ASG members are covered by the ASG lookup). WEB-test-a · web-ami(2026-09-19) · WAS-test-a(2026-09-22) 는 중지돼 조회 목록에서 뺐다 — resource 로는 compute.tf 에서 계속 소유한다. bas-server 는 유지(running)"
   type        = list(string)
-  default     = ["WAS-test-a", "bas-server"]
+  default     = ["bas-server"]
 }
 
 variable "security_group_names" {
@@ -135,8 +135,12 @@ variable "log_group_names" {
   default = [
     "/aws/rds/instance/database-1/error",
     "/aws/rds/instance/database-1/slowquery",
-    "/petclinic/web/access",
-    "/petclinic/web/error",
+    "/petclinic/prod/web/apache/access",
+    "/petclinic/prod/web/apache/error",
+    "/petclinic/prod/web/ssh/access",
+    "/petclinic/prod/web/bootstrap",
+    "/petclinic/prod/bastion/ssh/secure",
+    "/petclinic/prod/bastion/system/messages",
   ]
 }
 

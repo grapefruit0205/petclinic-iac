@@ -1,4 +1,4 @@
-# 컴퓨트 계층 — 골든 AMI 3개(web·was v1·was v2), 시작 템플릿 2개, ASG 2개 + 스케일링 정책, 단독 인스턴스 6대, WAS 데이터 볼륨.
+# 컴퓨트 계층 — 골든 AMI 3개(web·was v1·was v2), 시작 템플릿 2개, ASG 2개 + 스케일링 정책, 단독 인스턴스 5대, WAS 데이터 볼륨.
 # 키페어 `test-key` 는 퍼블릭 키를 API 로 못 읽어 import 할 수 없다 → 이름만 문자열로 쓴다.
 
 # web-ami 인스턴스(i-0c205c2e12ea8e389)에서 CreateImage 로 만든 골든 이미지. ASG 시작 템플릿 전 버전이 쓴다.
@@ -25,18 +25,43 @@ resource "aws_ami" "web_apache" {
   }
 }
 
-# ASG 시작 템플릿. 실물은 latest=6(t3.small), default=6 (2026-09-20 콘솔에서 4→6 으로 올림). ASG 는 6 을 고정해 쓴다.
-# 이 블록은 latest(6) 의 내용이다 — 속성을 바꾸면 v7 이 생기고 default_version 은 그대로 6 이다.
-# v6 (2026-09-19 21:40 KST): user data 에 CloudFront 커스텀 헤더(superheader) 검사 추가 — ALB 직접 접근은 403.
+# ASG 시작 템플릿. 실물은 latest=7 = default=7 (2026-09-22 14:30 KST CLI). ASG 는 7 을 고정해 쓴다. 이 블록은 latest(7) 의 내용.
+# v6 (2026-09-19): user data 에 CloudFront 커스텀 헤더(superheader) 검사 — ALB 직접 접근은 403. (userdata/web.sh 로 보관)
+# v7 (2026-09-22): v6 + access 로그 첫 칸 X-Forwarded-For(사용자 IP)·%D 처리시간, logrotate 3일, rsyslog(/var/log/secure),
+#   로그 그룹 이름 규칙 /petclinic/prod/web/…, 디스크·메모리 지표(PetClinic/WEB), 루트 30GB gp3, 인스턴스·볼륨 태그.
 resource "aws_launch_template" "web" {
   name            = "web"
-  description     = "superheader check: CloudFront-only access" # 최신 버전(v6) 의 버전 설명
-  default_version = 6
+  description     = "v7: XFF log format, logrotate, prod log groups, rsyslog, disk/mem metrics, root 30GB" # provider 는 최신 버전의 버전 설명을 읽는다
+  default_version = 7
 
   image_id      = aws_ami.web_apache.id
   instance_type = "t3.small"
   key_name      = "test-key"
-  user_data     = base64encode(file("${path.module}/userdata/web.sh"))
+  user_data     = base64encode(file("${path.module}/userdata/web-v7.sh"))
+
+  block_device_mappings {
+    device_name = "/dev/xvda"
+    ebs {
+      volume_size           = 30
+      volume_type           = "gp3"
+      delete_on_termination = true
+    }
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "ASG-Web"
+      Tier = "web"
+    }
+  }
+  tag_specifications {
+    resource_type = "volume"
+    tags = {
+      Name = "web-root"
+      Tier = "web"
+    }
+  }
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2.name
@@ -61,12 +86,12 @@ resource "aws_autoscaling_group" "web" {
   target_group_arns   = [aws_lb_target_group.web.arn]
 
   health_check_type         = "ELB"
-  health_check_grace_period = 60
+  health_check_grace_period = 120 # v7: 부팅 시 dnf 설치(에이전트·rsyslog)가 60초를 넘길 수 있어 2026-09-22 60→120
   default_cooldown          = 300
 
   launch_template {
     id      = aws_launch_template.web.id
-    version = "6" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다
+    version = "7" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (2026-09-22 6→7, 리프레시 482197d8)
   }
 
   # 그룹 지표 전부 켜져 있음
@@ -121,11 +146,12 @@ resource "aws_autoscaling_policy" "web_cpu" {
 # 단계 = 알람 임계치(20000) 기준 초과분 0~15000 → +1대, 15000 이상 → +2대. 이름의 "cale-out" 은 콘솔에서 입력한 오타 그대로.
 # 스케일 인 정책은 없다 — 줄이는 건 CPU 목표 추적(web_cpu)이 맡는다.
 resource "aws_autoscaling_policy" "web_reqcount" {
-  name                    = "cale-out-web-reqcount-20000~35000"
-  autoscaling_group_name  = aws_autoscaling_group.web.name
-  policy_type             = "StepScaling"
-  adjustment_type         = "ChangeInCapacity"
-  metric_aggregation_type = "Average"
+  name                      = "cale-out-web-reqcount-20000~35000"
+  autoscaling_group_name    = aws_autoscaling_group.web.name
+  policy_type               = "StepScaling"
+  adjustment_type           = "ChangeInCapacity"
+  metric_aggregation_type   = "Average"
+  estimated_instance_warmup = 300 # 2026-09-22 명시 (없으면 ASG 쿨다운 값에 묶임)
 
   step_adjustment {
     metric_interval_lower_bound = 0
@@ -286,9 +312,9 @@ resource "aws_autoscaling_policy" "was_cpu" {
   }
 }
 
-# --- 단독 인스턴스 6대 ---
-# 옛 WAS(수제). Tomcat 8080. 2026-09-21 WAS ASG(was-asg) 로 대체되며 tg-internal-alb 에서 등록 해제 — 트래픽 안 받지만 아직 running.
-# 프로파일 was-test-iam (AmazonRDSFullAccess). 종료·중지는 WAS 담당 결정 (종료하면 이 블록 + was_data 볼륨 블록 삭제 + state rm).
+# --- 단독 인스턴스 5대 ---
+# 옛 WAS(수제). Tomcat 8080. 2026-09-21 WAS ASG(was-asg) 로 대체되며 tg-internal-alb 에서 등록 해제, 2026-09-22 13:27 KST semin 이 **중지**
+# (실험용 보관, 프라이빗 서브넷이라 퍼블릭 IP 해제 문제 없음). 종료하면 이 블록 + was_data 볼륨·연결 블록 삭제 + state rm.
 resource "aws_instance" "was_test_a" {
   ami                         = "ami-0fad23d064f9e8330"
   instance_type               = "t3.medium"
@@ -338,9 +364,9 @@ resource "aws_instance" "web_test_a" {
   }
 }
 
-# 베스천. 퍼블릭 서브넷, 퍼블릭 IP 자동 할당(EIP 아님). 프로파일 없음. 2026-09-21 실측 running.
-# 운영 방침(2026-09-21 결정): 베스천 유지 + SSM(Session Manager) 병행. 같은 날 잠깐 있던 EC2 Instance Connect Endpoint 는
-# 저녁에 정리(코드·state 제거). 다음 손볼 것: mc-ec2-role 부착(SSM·로그), SG-bastion 22 를 팀원 IP 로 축소, EIP.
+# 베스천. 퍼블릭 서브넷, 퍼블릭 IP 자동 할당(EIP 아님). 2026-09-22 프로파일 bastion-role 부착(CloudWatch 만) + 에이전트가
+# /var/log/secure 를 /petclinic/prod/bastion/ssh/secure 로 전송 (인스턴스 안 수동 설치 — 재생성 시 user data 로 옮길 것).
+# 운영 방침(2026-09-21 결정): 베스천 유지. EICE 는 정리됨. 다음 손볼 것: SG-bastion 22 를 팀원 IP 로 축소, EIP.
 resource "aws_instance" "bastion" {
   ami                         = "ami-0fad23d064f9e8330"
   instance_type               = "t3.micro"
@@ -349,6 +375,7 @@ resource "aws_instance" "bastion" {
   associate_public_ip_address = true
   vpc_security_group_ids      = [aws_security_group.bastion.id]
   key_name                    = "test-key"
+  iam_instance_profile        = aws_iam_instance_profile.bastion.name
   monitoring                  = false
 
   root_block_device {
@@ -400,31 +427,7 @@ resource "aws_instance" "web_ami" {
   }
 }
 
-# 골든 이미지 was-goldenImage-test 의 원본 (2026-09-20 AL2023 2023.12 로 생성, 09-21 17:01 KST CreateImage). 현재 중지됨.
-# 위치가 WAS 서브넷이 아니라 DB 서브넷(private5, 10.0.30.x) 이다 — 굽기 전용이라 실해는 없지만 다시 만들 땐 WAS 서브넷에.
-# CPU 크레딧 standard(다른 t3 는 전부 unlimited) — 시작 템플릿으로 뜨는 인스턴스와는 무관.
-resource "aws_instance" "was_golden_image" {
-  ami                         = "ami-03137ee2d0c5af1fe" # al2023-ami-2023.12.20260918.0-kernel-6.18-x86_64
-  instance_type               = "t3.medium"
-  subnet_id                   = aws_subnet.private5_2a.id
-  private_ip                  = "10.0.30.145"
-  associate_public_ip_address = false
-  vpc_security_group_ids      = [aws_security_group.was.id]
-  key_name                    = "test-key"
-  iam_instance_profile        = aws_iam_instance_profile.was.name
-  monitoring                  = false
-
-  root_block_device {
-    volume_size           = 20
-    volume_type           = "gp3"
-    delete_on_termination = true
-    encrypted             = false
-  }
-
-  tags = {
-    Name = "was-goldenImage"
-  }
-}
+# (골든 이미지 v1 원본 was-goldenImage 인스턴스는 2026-09-22 13:27 KST semin 이 종료 — AMI 는 원본과 독립이라 영향 없음. 블록·state 제거.)
 
 # 골든 이미지 v2 의 원본 was-gg2 (2026-09-21 18:04 KST v1 AMI 로 생성 → 손본 뒤 18:38 CreateImage, semin). 20:58 다시 시작해 running —
 # 타깃 그룹엔 없으니 트래픽은 안 받는다(다음 골든 이미지 작업용으로 추정).

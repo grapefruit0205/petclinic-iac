@@ -11,3 +11,13 @@ override.tf.json
 # .terraform.lock.hcl 은 커밋한다 (프로바이더 버전 고정)
 # 저장한 plan 파일(import 용) — 리소스 속성 전체가 들어 있어 커밋하지 않는다
 *.tfplan
+
+# SSH 개인 키 — 절대 커밋 금지
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# 발표 자료 빌드 산출물 (다른 도구가 생성) — 커밋 안 함
+.codex-presentation-build/
+output/

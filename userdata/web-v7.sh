@@ -46,7 +46,9 @@ setsebool -P httpd_can_network_connect 1 || true
 apachectl configtest && systemctl enable --now httpd && systemctl restart httpd
 
 # --- CloudWatch Agent: 부팅 시 설치(약 30초) → 설정 JSON 을 파일로 쓰고 실행 ---
-dnf install -y amazon-cloudwatch-agent
+# rsyslog: AL2023 은 기본으로 없어서 /var/log/secure 가 안 생긴다 (베스천에서 2026-09-22 실측). ssh/access 로그 그룹용.
+dnf install -y rsyslog amazon-cloudwatch-agent
+systemctl enable --now rsyslog
 # 어느 파일을 → 어느 로그 그룹으로 보낼지. 그룹은 클래스·보존기간을 지정해 미리 만들어 둔다 (에이전트가 만들면 STANDARD·무기한).
 #   /var/log/httpd/access_log   → /petclinic/prod/web/apache/access  (30일, IA)      xff 포맷: 첫 칸 사용자 IP, 마지막 %D 처리시간
 #   /var/log/httpd/error_log    → /petclinic/prod/web/apache/error   (90일, STANDARD) 멀티라인: "[" 로 시작하는 줄이 새 이벤트

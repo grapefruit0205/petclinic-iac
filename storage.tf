@@ -1,4 +1,4 @@
-# 스토리지 · 로그 — 정적 자원 버킷(CloudFront OAC 전용), 로그 버킷 3개(ALB · 중앙 로그(CloudFront) · WAF) + 정책, CloudWatch 로그 그룹 4개.
+# 스토리지 · 로그 — 정적 자원 버킷(CloudFront OAC 전용), 로그 버킷 3개(ALB · 중앙 로그(CloudFront) · WAF) + 정책, CloudWatch 로그 그룹 8개(web 4 + 베스천 2 + RDS 2).
 
 resource "aws_s3_bucket" "static" {
   bucket = "mc-static-image"
@@ -45,15 +45,74 @@ resource "aws_s3_bucket_policy" "static" {
 }
 
 # --- CloudWatch 로그 그룹 ---
-# web 인스턴스의 CloudWatch Agent 가 쓴다 (userdata/web.sh).
-resource "aws_cloudwatch_log_group" "web_access" {
-  name              = "/petclinic/web/access"
+# 이름 규칙(2026-09-21 결정): /petclinic/<환경>/<계층>/<소스>/<종류>. 클래스는 생성 후 못 바꾸므로 에이전트 기동 전에 CLI 로 만든다.
+# IA(Infrequent Access)는 저장 단가가 절반이지만 지표 필터·구독·S3 내보내기가 안 된다 → 알람을 걸 error 계열만 STANDARD.
+# Apache access 로그의 S3 장기 보관은 하지 않는다 — 같은 요청이 ALB 액세스 로그·CloudFront 로그로 이미 S3 에 남는다. 태그 Tier 로 계층 구분.
+
+# (옛 이름 /petclinic/web/{access,error} 는 LT v6 가 쓰던 것 — 2026-09-22 14:33 v7 리프레시와 함께 삭제. 코드·state 에서 제거.)
+
+# web v7 용 4개 (2026-09-22 생성, userdata/web-v7.sh 의 log_group_name 과 글자 단위로 같아야 한다). 14:34 리프레시 뒤 v7 2대가 쓰는 중.
+resource "aws_cloudwatch_log_group" "web_apache_access" {
+  name              = "/petclinic/prod/web/apache/access"
   retention_in_days = 30
+  log_group_class   = "INFREQUENT_ACCESS" # 양이 가장 많고 조회만 함
+
+  tags = {
+    Tier = "WEB"
+  }
 }
 
-resource "aws_cloudwatch_log_group" "web_error" {
-  name              = "/petclinic/web/error"
+resource "aws_cloudwatch_log_group" "web_apache_error" {
+  name              = "/petclinic/prod/web/apache/error"
   retention_in_days = 90
+  log_group_class   = "STANDARD" # 5xx·프록시 오류 지표 필터 대상
+
+  tags = {
+    Tier = "WEB"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "web_ssh_access" {
+  name              = "/petclinic/prod/web/ssh/access"
+  retention_in_days = 90
+  log_group_class   = "INFREQUENT_ACCESS"
+
+  tags = {
+    Tier = "WEB"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "web_bootstrap" {
+  name              = "/petclinic/prod/web/bootstrap"
+  retention_in_days = 14
+  log_group_class   = "STANDARD"
+
+  tags = {
+    Tier = "WEB"
+  }
+}
+
+# 베스천 SSH 로그인 이력 (2026-09-22 콘솔 생성). 22 가 전체 개방이라 실패 시도 지표 필터를 걸 수 있게 STANDARD.
+resource "aws_cloudwatch_log_group" "bastion_ssh_secure" {
+  name              = "/petclinic/prod/bastion/ssh/secure"
+  retention_in_days = 90
+  log_group_class   = "STANDARD"
+
+  tags = {
+    Tier = "BASTION"
+  }
+}
+
+# 베스천 /var/log/messages 용 (2026-09-22 베스천 안에서 생성). 에이전트 설정(cw-bastion.json)엔 아직 안 넣어 비어 있다 —
+# 시스템 이상(디스크·OOM)은 지표로 보고 있어 선택 사항. 쓰려면 userdata/bastion-cwagent.sh 의 collect_list 에 추가 후 fetch-config.
+resource "aws_cloudwatch_log_group" "bastion_system_messages" {
+  name              = "/petclinic/prod/bastion/system/messages"
+  retention_in_days = 14
+  log_group_class   = "INFREQUENT_ACCESS"
+
+  tags = {
+    Tier = "BASTION"
+  }
 }
 
 # RDS 쪽 2개는 보존기간 없음(0 = 만료 안 됨). (/aws/rds/proxy/pet-proxy 는 프록시와 함께 2026-09-22 삭제)

@@ -1,4 +1,4 @@
-# IAM — EC2 역할 2개 + 인스턴스 프로파일 2개, RDS 관련 역할 2개.
+# IAM — EC2 역할 3개(web·WAS·베스천) + 인스턴스 프로파일 3개, RDS 모니터링 역할 1개.
 # 관리형 정책 연결은 aws_iam_role_policy_attachment 로 분리 (역할 블록의 managed_policy_arns 는 쓰지 않는다).
 
 # ASG 웹 · web-ami 가 쓰는 역할. SSM 관리 노드 + CloudWatch Agent 로그 전송.
@@ -32,6 +32,35 @@ resource "aws_iam_instance_profile" "ec2" {
   name = "mc-ec2-role"
   path = "/"
   role = aws_iam_role.ec2.name
+}
+
+# 베스천 전용 역할 (2026-09-22 콘솔 생성). 최소 권한 원칙으로 CloudWatch Agent 로그 전송만 — SSM 은 일부러 안 붙였다
+# (mc-ec2-role 을 재사용하면 Session Manager 까지 딸려 와서 별도 역할로 분리). 베스천 접속은 SSH(22) 그대로.
+resource "aws_iam_role" "bastion" {
+  name                 = "bastion-role"
+  path                 = "/"
+  description          = "bastion: CloudWatch Agent log shipping only"
+  max_session_duration = 3600
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "bastion_cloudwatch" {
+  role       = aws_iam_role.bastion.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+resource "aws_iam_instance_profile" "bastion" {
+  name = "bastion-role"
+  path = "/"
+  role = aws_iam_role.bastion.name
 }
 
 # WAS-test-a 역할. ⚠️ AmazonRDSFullAccess — 과잉 권한. SSM 정책은 없어 SSM 미관리.

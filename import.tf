@@ -295,14 +295,6 @@ import {
   id = "mc-static-image"
 }
 import {
-  to = aws_cloudwatch_log_group.web_access
-  id = "/petclinic/web/access"
-}
-import {
-  to = aws_cloudwatch_log_group.web_error
-  id = "/petclinic/web/error"
-}
-import {
   to = aws_cloudwatch_log_group.rds_error
   id = "/aws/rds/instance/database-1/error"
 }
@@ -420,10 +412,6 @@ import {
   id = "ami-0bd669bb5ad494b67"
 }
 import {
-  to = aws_instance.was_golden_image
-  id = "i-09889af7ae933ba63"
-}
-import {
   to = aws_s3_bucket.central_logs
   id = "mc-logs-petclinic"
 }
@@ -485,4 +473,42 @@ import {
 import {
   to = aws_iam_role_policy.was_read_rds_secret
   id = "was-test-iam:PetclinicReadRdsSecret"
+}
+
+# --- 2026-09-22 오후: 베스천 전용 역할(CloudWatch 만) + 새 규칙 로그 그룹 5개 (web v7 용 4 + 베스천 1) ---
+import {
+  to = aws_iam_role.bastion
+  id = "bastion-role"
+}
+import {
+  to = aws_iam_role_policy_attachment.bastion_cloudwatch
+  id = "bastion-role/arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+import {
+  to = aws_iam_instance_profile.bastion
+  id = "bastion-role"
+}
+import {
+  to = aws_cloudwatch_log_group.web_apache_access
+  id = "/petclinic/prod/web/apache/access"
+}
+import {
+  to = aws_cloudwatch_log_group.web_apache_error
+  id = "/petclinic/prod/web/apache/error"
+}
+import {
+  to = aws_cloudwatch_log_group.web_ssh_access
+  id = "/petclinic/prod/web/ssh/access"
+}
+import {
+  to = aws_cloudwatch_log_group.web_bootstrap
+  id = "/petclinic/prod/web/bootstrap"
+}
+import {
+  to = aws_cloudwatch_log_group.bastion_ssh_secure
+  id = "/petclinic/prod/bastion/ssh/secure"
+}
+import {
+  to = aws_cloudwatch_log_group.bastion_system_messages
+  id = "/petclinic/prod/bastion/system/messages"
 }
