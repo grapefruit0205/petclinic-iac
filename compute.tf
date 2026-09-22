@@ -217,7 +217,7 @@ resource "aws_ami" "was_golden_v2" {
 # t3.medium, 프로파일 was-test-iam(RDS 만 — SSM·CloudWatch 정책 없음). user data 는 /dev/sdf 를 /data 로 마운트하고 Tomcat 기동.
 resource "aws_launch_template" "was" {
   name            = "was-lt"
-  default_version = 1
+  default_version = 2 # 2026-09-22 16:14 KST semin: 1 → 2 (ASG 는 $Latest 라 실제 동작엔 변화 없음)
 
   image_id      = aws_ami.was_golden_v2.id
   instance_type = "t3.medium"

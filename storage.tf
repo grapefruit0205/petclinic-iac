@@ -1,4 +1,4 @@
-# 스토리지 · 로그 — 정적 자원 버킷(CloudFront OAC 전용), 로그 버킷 3개(ALB · 중앙 로그(CloudFront) · WAF) + 정책, CloudWatch 로그 그룹 8개(web 4 + 베스천 2 + RDS 2).
+# 스토리지 · 로그 — 정적 자원 버킷(CloudFront OAC 전용), 로그 버킷 2개(중앙 = CloudFront + ALB · WAF) + 정책·수명주기, CloudWatch 로그 그룹 8개(web 4 + 베스천 2 + RDS 2).
 
 resource "aws_s3_bucket" "static" {
   bucket = "mc-static-image"
@@ -126,65 +126,7 @@ resource "aws_cloudwatch_log_group" "rds_slowquery" {
   retention_in_days = 0
 }
 
-# --- ALB 액세스 로그 버킷 (2026-09-21 콘솔 생성, Phase 1-A) ---
-# Public·Internal ALB 가 요청 단위 로그(경로·응답시간·타깃·코드)를 gzip 으로 쓴다. 90일 뒤 만료.
-# 정책은 서울 리전 ELB 로그 계정(600734575887)과 logdelivery 서비스 둘 다 허용 — 콘솔이 만든 그대로.
-resource "aws_s3_bucket" "alb_logs" {
-  bucket = "petclinic-log-alb"
-}
-
-resource "aws_s3_bucket_public_access_block" "alb_logs" {
-  bucket = aws_s3_bucket.alb_logs.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_policy" "alb_logs" {
-  bucket = aws_s3_bucket.alb_logs.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AllowELBLogDeliveryService"
-        Effect    = "Allow"
-        Principal = { Service = "logdelivery.elasticloadbalancing.amazonaws.com" }
-        Action    = "s3:PutObject"
-        Resource  = "${aws_s3_bucket.alb_logs.arn}/alb/*"
-        Condition = {
-          StringEquals = { "s3:x-amz-acl" = "bucket-owner-full-control" }
-        }
-      },
-      {
-        Sid       = "AllowELBLogDeliveryAccount"
-        Effect    = "Allow"
-        Principal = { AWS = "arn:aws:iam::600734575887:root" }
-        Action    = "s3:PutObject"
-        Resource  = "${aws_s3_bucket.alb_logs.arn}/alb/*"
-      },
-    ]
-  })
-}
-
-resource "aws_s3_bucket_lifecycle_configuration" "alb_logs" {
-  bucket = aws_s3_bucket.alb_logs.id
-
-  rule {
-    id     = "expire-90d"
-    status = "Enabled"
-
-    filter {
-      prefix = ""
-    }
-
-    expiration {
-      days = 90
-    }
-  }
-}
+# (ALB 전용 로그 버킷 petclinic-log-alb 는 2026-09-22 16:23 삭제 — ALB 로그는 아래 중앙 버킷 petclinic/prod/entry/ 로 이동.)
 
 # 2026-09-21: 버전 관리 + 이전 버전 30일 보관 — 정적 파일을 잘못 지우거나 덮어써도 되살릴 수 있게 (그동안 두 번 사고).
 resource "aws_s3_bucket_versioning" "static" {
@@ -212,10 +154,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "static" {
   }
 }
 
-# --- 중앙 로그 버킷 (2026-09-21 콘솔 생성) ---
-# 2026-09-21 18:06~18:31 KST yena: CloudFront 표준 로그(v2) 목적지로 사용 시작 — edge.tf 의 log delivery 3종이
-# `petclinic/prod/edge/cloudfront/access/{yyyy}/{MM}/{dd}/{HH}` 로 쓴다. 버킷 정책은 콘솔이 자동 생성한 것(delivery.logs 서비스).
-# 수명주기 없음(로그가 무한히 쌓인다 — 보존 기간 정하면 lifecycle 추가). CloudWatch Logs → S3 내보내기(Phase 2) 목적지도 겸할 예정.
+# --- 중앙 로그 버킷 (2026-09-21 콘솔 생성) — S3 로그의 한 지붕 ---
+#   petclinic/prod/edge/cloudfront/access/year=…   CloudFront 표준 로그 v2 (yena 9/21, edge.tf 의 log delivery 3종, Hive 경로)
+#   petclinic/prod/entry/alb/{public,internal}/AWSLogs/…   ALB 액세스 로그 (9/22 16:21 전용 버킷에서 이동; ALB 는 AWSLogs/… 를 스스로 붙임)
+# WAF 로그만 별도 버킷 — AWS 규칙상 버킷 이름이 aws-waf-logs- 로 시작해야 해서.
+# 정책 = CloudFront 전송용 2문장(콘솔 자동) + ELB 서비스·서울 ELB 계정(600734575887) 쓰기 2문장. 수명주기는 접두사별.
 resource "aws_s3_bucket" "central_logs" {
   bucket = "mc-logs-petclinic"
 }
@@ -249,8 +192,43 @@ resource "aws_s3_bucket_policy" "central_logs" {
           ArnLike      = { "aws:SourceArn" = aws_cloudwatch_log_delivery_source.cloudfront_access.arn }
         }
       },
+      {
+        Sid       = "AllowELBLogDeliveryService"
+        Effect    = "Allow"
+        Principal = { Service = "logdelivery.elasticloadbalancing.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.central_logs.arn}/petclinic/prod/entry/*"
+        Condition = {
+          StringEquals = { "s3:x-amz-acl" = "bucket-owner-full-control" }
+        }
+      },
+      {
+        Sid       = "AllowELBLogDeliveryAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::600734575887:root" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.central_logs.arn}/petclinic/prod/entry/*"
+      },
     ]
   })
+}
+
+# 접두사별 보존. edge(CloudFront) 쪽 규칙은 아직 콘솔에서 안 만듦 — 만들면 여기 rule 추가 + plan.
+resource "aws_s3_bucket_lifecycle_configuration" "central_logs" {
+  bucket = aws_s3_bucket.central_logs.id
+
+  rule {
+    id     = "expire-entry-90d"
+    status = "Enabled"
+
+    filter {
+      prefix = "petclinic/prod/entry/"
+    }
+
+    expiration {
+      days = 90
+    }
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "central_logs" {

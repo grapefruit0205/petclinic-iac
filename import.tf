@@ -345,22 +345,6 @@ import {
 }
 
 # --- ALB 액세스 로그 버킷 (2026-09-21 콘솔 생성) ---
-import {
-  to = aws_s3_bucket.alb_logs
-  id = "petclinic-log-alb"
-}
-import {
-  to = aws_s3_bucket_public_access_block.alb_logs
-  id = "petclinic-log-alb"
-}
-import {
-  to = aws_s3_bucket_policy.alb_logs
-  id = "petclinic-log-alb"
-}
-import {
-  to = aws_s3_bucket_lifecycle_configuration.alb_logs
-  id = "petclinic-log-alb"
-}
 
 # --- Public ALB 443 superheader 규칙 (2026-09-21 콘솔 생성) ---
 import {
@@ -511,4 +495,8 @@ import {
 import {
   to = aws_cloudwatch_log_group.bastion_system_messages
   id = "/petclinic/prod/bastion/system/messages"
+}
+import {
+  to = aws_s3_bucket_lifecycle_configuration.central_logs
+  id = "mc-logs-petclinic"
 }

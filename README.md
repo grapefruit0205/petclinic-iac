@@ -51,7 +51,7 @@ state 가 있으므로 이제 `terraform plan` 은 **코드(2026-09-19 스냅샷
 | 컴퓨트 | `compute.tf` | 골든 AMI `web-appache` · `was-goldenImage-test` · `was-goldenImage-test-v2`, 시작 템플릿 `web` · `was-lt`(latest v2, default 1), ASG `web-test`(CPU 60% 목표추적 + 요청수 단계 정책) · `was-asg`(CPU 60%, `$Latest`), 단독 인스턴스 5(골든 이미지 v2 원본 `was-gg2` 포함; v1 원본 `was-goldenImage` 는 9/22 종료), WAS 데이터 볼륨 + 연결 |
 | IAM | `iam.tf` | 역할 4 (`mc-ec2-role` · `was-test-iam` · `bastion-role` · `rds-monitoring-role`), 프로파일 3, 정책 연결 5, 인라인 정책 1 (`was-test-iam` 의 `PetclinicReadRdsSecret`) |
 | 데이터 | `database.tf` | RDS `database-1`, 파라미터 그룹, 서브넷 그룹 (RDS Proxy 는 2026-09-22 제거 결정 — 코드·state 에서 뺌) |
-| 스토리지·로그 | `storage.tf` | S3 `mc-static-image` + 정책 · 퍼블릭 차단 · 암호화 · 버전 관리, ALB 로그 버킷 `petclinic-log-alb` + 정책 · 퍼블릭 차단 · 수명주기(90일), 중앙 로그 버킷 `mc-logs-petclinic` + 정책(CloudFront 로그 전송용), WAF 로그 버킷 `aws-waf-logs-petclinic-block`(us-east-1) + 정책, 로그 그룹 8 (web 4 · 베스천 2 · RDS 2) |
+| 스토리지·로그 | `storage.tf` | S3 `mc-static-image` + 정책 · 퍼블릭 차단 · 암호화 · 버전 관리, 중앙 로그 버킷 `mc-logs-petclinic`(CloudFront `petclinic/prod/edge/` + ALB `petclinic/prod/entry/`) + 정책 · 퍼블릭 차단 · 수명주기(entry 90일), WAF 로그 버킷 `aws-waf-logs-petclinic-block`(us-east-1) + 정책, 로그 그룹 8 (web 4 · 베스천 2 · RDS 2) |
 | 모니터링 | `monitoring.tf` | SNS 토픽 `mc-alerts` + 이메일 구독, 알람 `alarm-web-reqcount-high-20000` (Public ALB 타깃당 요청수 → web 단계 정책 + 메일) |
 | 엣지 | `edge.tf` | CloudFront 분포 + OAC + Function(`petclinic-home-to-landing`, 코드는 `cloudfront/`), WAF 웹 ACL + 로깅 설정(S3, BLOCK 만), CloudFront 표준 로그 v2 전송 3종(소스·목적지·전송, us-east-1), CloudFront 인증서, Route53 존 + 레코드 3 (A · AAAA · ACM 검증) |
 

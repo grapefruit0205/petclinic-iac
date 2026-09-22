@@ -132,33 +132,21 @@ resource "aws_security_group" "web" {
 
 # WAS 인스턴스. ⚠️ 80·443·8080 이 0.0.0.0/0 에 열려 있다 (설명은 "alb-internal-sg" 지만 소스는 전체).
 # 프라이빗 서브넷이라 인터넷에서 직접 닿지는 않지만 VPC 안 어디서든 접근 가능.
+# 2026-09-22 15:50 KST yena: 80·443·8080 의 0.0.0.0/0 전부 회수 → 남은 건 내부 ALB → 8080, 베스천 → 22 뿐 (web SG 와 같은 원칙).
 resource "aws_security_group" "was" {
   name        = "was-instance-sg"
   description = "was allow"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port       = 80
-    to_port         = 80
+    description     = "alb-internal-sg"
+    from_port       = 8080
+    to_port         = 8080
     protocol        = "tcp"
-    cidr_blocks     = ["0.0.0.0/0"]
-    security_groups = [aws_security_group.bastion.id]
+    security_groups = [aws_security_group.alb_internal.id]
   }
   ingress {
-    description = "alb-internal-sg"
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    description = "ssm"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
+    description     = "SG-bastion"
     from_port       = 22
     to_port         = 22
     protocol        = "tcp"

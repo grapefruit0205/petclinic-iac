@@ -15,8 +15,8 @@ resource "aws_lb" "public" {
   drop_invalid_header_fields = false
 
   access_logs {
-    bucket  = aws_s3_bucket.alb_logs.bucket
-    prefix  = "alb/public"
+    bucket  = aws_s3_bucket.central_logs.bucket
+    prefix  = "petclinic/prod/entry/alb/public" # 2026-09-22 16:21 전용 버킷 petclinic-log-alb → 중앙 버킷 (CloudFront 로그와 한 지붕)
     enabled = true
   }
   connection_logs {
@@ -38,8 +38,8 @@ resource "aws_lb" "internal" {
   drop_invalid_header_fields = false
 
   access_logs {
-    bucket  = aws_s3_bucket.alb_logs.bucket
-    prefix  = "alb/internal"
+    bucket  = aws_s3_bucket.central_logs.bucket
+    prefix  = "petclinic/prod/entry/alb/internal"
     enabled = true
   }
   connection_logs {

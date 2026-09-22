@@ -119,6 +119,31 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     }
   }
 
+  # 2026-09-22 15:33 KST yena: IP 당 5분 3,000건 초과 감지. 아직 Count(기록만) — 부하 테스트에서 JMeter 1대가 여기 걸리므로
+  # (동적 200 RPS = 5분 60,000건) Block 으로 바꾸기 전에 테스트 IP 예외 또는 한도 조정 필요.
+  rule {
+    name     = "Rate-based-Rule"
+    priority = 4
+
+    action {
+      count {}
+    }
+
+    statement {
+      rate_based_statement {
+        aggregate_key_type    = "IP"
+        evaluation_window_sec = 300
+        limit                 = 3000
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "Rate-based-Rule"
+      sampled_requests_enabled   = true
+    }
+  }
+
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = "CreatedByCloudFront-2407cc5b"
