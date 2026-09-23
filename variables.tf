@@ -140,7 +140,6 @@ variable "log_group_names" {
     "/petclinic/prod/web/ssh/access",
     "/petclinic/prod/web/bootstrap",
     "/petclinic/prod/bastion/ssh/secure",
-    "/petclinic/prod/bastion/system/messages",
   ]
 }
 

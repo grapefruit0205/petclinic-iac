@@ -1,6 +1,6 @@
 #!/bin/bash
 # 베스천 CloudWatch Agent 설치·설정 (2026-09-22). 인스턴스 안에서 `bash bastion-cwagent.sh` 로 1회 실행.
-# 전제: 인스턴스 프로파일 bastion-role (CloudWatchAgentServerPolicy), 로그 그룹 /petclinic/prod/bastion/ssh/secure 가 먼저 있어야 한다.
+# 전제: 인스턴스 프로파일 CloudWatchAgentServerPolicy (역할 이름 — 같은 이름의 관리형 정책 1개만 붙음), 로그 그룹 /petclinic/prod/bastion/ssh/secure 가 먼저 있어야 한다.
 # 베스천을 새로 만들 땐 이 파일을 user data 로 넣으면 같은 결과.
 set -euo pipefail
 

@@ -1,4 +1,4 @@
-# 스토리지 · 로그 — 정적 자원 버킷(CloudFront OAC 전용), 로그 버킷 2개(중앙 = CloudFront + ALB · WAF) + 정책·수명주기, CloudWatch 로그 그룹 8개(web 4 + 베스천 2 + RDS 2).
+# 스토리지 · 로그 — 정적 자원 버킷(CloudFront OAC 전용), 로그 버킷 2개(중앙 = CloudFront + ALB · WAF) + 정책·수명주기, CloudWatch 로그 그룹 7개(web 4 + 베스천 1 + RDS 2).
 
 resource "aws_s3_bucket" "static" {
   bucket = "mc-static-image"
@@ -45,21 +45,22 @@ resource "aws_s3_bucket_policy" "static" {
 }
 
 # --- CloudWatch 로그 그룹 ---
-# 이름 규칙(2026-09-21 결정): /petclinic/<환경>/<계층>/<소스>/<종류>. 클래스는 생성 후 못 바꾸므로 에이전트 기동 전에 CLI 로 만든다.
-# IA(Infrequent Access)는 저장 단가가 절반이지만 지표 필터·구독·S3 내보내기가 안 된다 → 알람을 걸 error 계열만 STANDARD.
-# Apache access 로그의 S3 장기 보관은 하지 않는다 — 같은 요청이 ALB 액세스 로그·CloudFront 로그로 이미 S3 에 남는다. 태그 Tier 로 계층 구분.
+# 이름 규칙(2026-09-21 결정): /petclinic/<환경>/<계층>/<소스>/<종류>. 태그 Tier 로 계층 구분.
+# IA(Infrequent Access)는 저장 단가가 절반이지만 지표 필터·구독·S3 내보내기가 안 된다. 2026-09-22 jaewoon(로그 담당)이 IA 그룹 3개를
+# 삭제 — 지금은 전부 STANDARD (에이전트가 만들 때의 기본값).
+# 2026-09-23 web v10 부터 보존기간은 에이전트 설정의 retention_in_days 가 건다 — 그룹이 없으면 그 값으로 만들고, 있으면 그 값으로 맞춘다.
+# 그래서 미리 만들 필요가 없고 지워져도 같은 보존기간으로 다시 생긴다. 태그만은 에이전트가 못 붙여 콘솔에서 붙인다.
+# Apache access 로그의 S3 장기 보관은 하지 않는다 — 같은 요청이 ALB 액세스 로그·CloudFront 로그로 이미 S3 에 남는다.
 
 # (옛 이름 /petclinic/web/{access,error} 는 LT v6 가 쓰던 것 — 2026-09-22 14:33 v7 리프레시와 함께 삭제. 코드·state 에서 제거.)
 
-# web v7 용 4개 (2026-09-22 생성, userdata/web-v7.sh 의 log_group_name 과 글자 단위로 같아야 한다). 14:34 리프레시 뒤 v7 2대가 쓰는 중.
+# web 4개 — userdata/web-v10.sh 의 log_group_name·retention_in_days 와 같아야 한다 (다르면 에이전트가 콘솔 값을 되돌린다).
+# apache/access: 9/22 17:54 jaewoon 이 IA 그룹을 삭제 → 9/23 11:15 web 에이전트가 자동 재생성(무기한) → 14:15 v9 에이전트가 30일로 맞춤.
+# 태그 Tier=WEB 은 아직 없음 — jaewoon 이 콘솔에서 붙이면 tags 추가 (지금 코드에 두면 plan 에 변경 1건이 생긴다).
 resource "aws_cloudwatch_log_group" "web_apache_access" {
   name              = "/petclinic/prod/web/apache/access"
   retention_in_days = 30
-  log_group_class   = "INFREQUENT_ACCESS" # 양이 가장 많고 조회만 함
-
-  tags = {
-    Tier = "WEB"
-  }
+  log_group_class   = "STANDARD"
 }
 
 resource "aws_cloudwatch_log_group" "web_apache_error" {
@@ -72,14 +73,12 @@ resource "aws_cloudwatch_log_group" "web_apache_error" {
   }
 }
 
+
+# SSH 로그인 이력(/var/log/secure). 9/22 17:54 jaewoon 이 IA 그룹을 삭제 → 9/23 14:15 v9 에이전트가 90일로 자동 생성. 태그는 apache/access 와 같이 아직 없음.
 resource "aws_cloudwatch_log_group" "web_ssh_access" {
   name              = "/petclinic/prod/web/ssh/access"
   retention_in_days = 90
-  log_group_class   = "INFREQUENT_ACCESS"
-
-  tags = {
-    Tier = "WEB"
-  }
+  log_group_class   = "STANDARD"
 }
 
 resource "aws_cloudwatch_log_group" "web_bootstrap" {
@@ -103,17 +102,6 @@ resource "aws_cloudwatch_log_group" "bastion_ssh_secure" {
   }
 }
 
-# 베스천 /var/log/messages 용 (2026-09-22 베스천 안에서 생성). 에이전트 설정(cw-bastion.json)엔 아직 안 넣어 비어 있다 —
-# 시스템 이상(디스크·OOM)은 지표로 보고 있어 선택 사항. 쓰려면 userdata/bastion-cwagent.sh 의 collect_list 에 추가 후 fetch-config.
-resource "aws_cloudwatch_log_group" "bastion_system_messages" {
-  name              = "/petclinic/prod/bastion/system/messages"
-  retention_in_days = 14
-  log_group_class   = "INFREQUENT_ACCESS"
-
-  tags = {
-    Tier = "BASTION"
-  }
-}
 
 # RDS 쪽 2개는 보존기간 없음(0 = 만료 안 됨). (/aws/rds/proxy/pet-proxy 는 프록시와 함께 2026-09-22 삭제)
 resource "aws_cloudwatch_log_group" "rds_error" {

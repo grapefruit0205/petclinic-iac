@@ -1,4 +1,4 @@
-# IAM — EC2 역할 3개(web·WAS·베스천) + 인스턴스 프로파일 3개, RDS 모니터링 역할 1개.
+# IAM — EC2 역할 3개(web·WAS·CloudWatch 전용) + 인스턴스 프로파일 3개, Chatbot 역할 1개, RDS 모니터링 역할 1개.
 # 관리형 정책 연결은 aws_iam_role_policy_attachment 로 분리 (역할 블록의 managed_policy_arns 는 쓰지 않는다).
 
 # ASG 웹 · web-ami 가 쓰는 역할. SSM 관리 노드 + CloudWatch Agent 로그 전송.
@@ -34,34 +34,79 @@ resource "aws_iam_instance_profile" "ec2" {
   role = aws_iam_role.ec2.name
 }
 
-# 베스천 전용 역할 (2026-09-22 콘솔 생성). 최소 권한 원칙으로 CloudWatch Agent 로그 전송만 — SSM 은 일부러 안 붙였다
-# (mc-ec2-role 을 재사용하면 Session Manager 까지 딸려 와서 별도 역할로 분리). 베스천 접속은 SSH(22) 그대로.
-resource "aws_iam_role" "bastion" {
-  name                 = "bastion-role"
+# web(시작 템플릿 v8)·베스천 공용 — CloudWatch Agent 로그·지표 전송만, SSM 없음 (최소 권한). 2026-09-22 13:44 콘솔 생성.
+# ⚠️ 역할 이름이 AWS 관리형 정책 이름과 같다(CloudWatchAgentServerPolicy) — 정책이 아니라 역할이다.
+# 17:33 web LT v8, 17:36 베스천이 이 프로파일로 전환. 같은 권한이던 bastion-role 은 정리하기로 결정(2026-09-23) — 코드·state 에서 제거.
+# 참고: 이 정책의 ssm:GetParameter 는 parameter/AmazonCloudWatch-* 만 허용 → /petclinic/cwagent/* 파라미터는 못 읽는다.
+resource "aws_iam_role" "cw_agent" {
+  name                 = "CloudWatchAgentServerPolicy"
   path                 = "/"
-  description          = "bastion: CloudWatch Agent log shipping only"
+  description          = "Allows EC2 instances to call AWS services on your behalf."
   max_session_duration = 3600
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Action    = "sts:AssumeRole"
       Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
     }]
   })
 }
 
-resource "aws_iam_role_policy_attachment" "bastion_cloudwatch" {
-  role       = aws_iam_role.bastion.name
+resource "aws_iam_role_policy_attachment" "cw_agent" {
+  role       = aws_iam_role.cw_agent.name
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
-resource "aws_iam_instance_profile" "bastion" {
-  name = "bastion-role"
+resource "aws_iam_instance_profile" "cw_agent" {
+  name = "CloudWatchAgentServerPolicy"
   path = "/"
-  role = aws_iam_role.bastion.name
+  role = aws_iam_role.cw_agent.name
 }
+
+# Slack 알림(AWS Chatbot) 채널 역할 — 2026-09-22 18:15 콘솔 템플릿이 생성. 알림 카드에 CloudWatch 그래프를 붙이는 읽기 권한.
+resource "aws_iam_role" "chatbot" {
+  name                 = "chatbot-petclinic-alerts"
+  path                 = "/service-role/"
+  max_session_duration = 3600
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "chatbot.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_policy" "chatbot_notifications" {
+  name        = "AWS-Chatbot-NotificationsOnly-Policy-f4d7e8f8-6429-4ff2-8088-501c6ecac3f5"
+  path        = "/service-role/"
+  description = "NotificationsOnly policy for AWS-Chatbot"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action   = ["cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*"]
+      Effect   = "Allow"
+      Resource = "*"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "chatbot_notifications" {
+  role       = aws_iam_role.chatbot.name
+  policy_arn = aws_iam_policy.chatbot_notifications.arn
+}
+
+# 콘솔 템플릿 "Amazon Q Developer 액세스 권한" — 채널에서 Q 에게 질문하는 기능. 알림만 쓰면 불필요(떼도 됨).
+resource "aws_iam_role_policy_attachment" "chatbot_q" {
+  role       = aws_iam_role.chatbot.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonQDeveloperAccess"
+}
+
 
 # WAS-test-a 역할. ⚠️ AmazonRDSFullAccess — 과잉 권한. SSM 정책은 없어 SSM 미관리.
 resource "aws_iam_role" "was" {

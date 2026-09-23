@@ -25,19 +25,25 @@ resource "aws_ami" "web_apache" {
   }
 }
 
-# ASG 시작 템플릿. 실물은 latest=7 = default=7 (2026-09-22 14:30 KST CLI). ASG 는 7 을 고정해 쓴다. 이 블록은 latest(7) 의 내용.
+# ASG 시작 템플릿. 실물은 latest=10 = default=10. ASG 는 10 을 고정해 쓴다. 이 블록은 latest(10) 의 내용.
 # v6 (2026-09-19): user data 에 CloudFront 커스텀 헤더(superheader) 검사 — ALB 직접 접근은 403. (userdata/web.sh 로 보관)
 # v7 (2026-09-22): v6 + access 로그 첫 칸 X-Forwarded-For(사용자 IP)·%D 처리시간, logrotate 3일, rsyslog(/var/log/secure),
 #   로그 그룹 이름 규칙 /petclinic/prod/web/…, 디스크·메모리 지표(PetClinic/WEB), 루트 30GB gp3, 인스턴스·볼륨 태그.
+# v8 (2026-09-22 17:33, kdt5 — 의도한 변경): v7 과 user data 동일, 프로파일만 mc-ec2-role → CloudWatchAgentServerPolicy(CloudWatch 만).
+#   ⚠️ 이 역할엔 SSM 이 없어 v8 부터 web 은 Session Manager·Run Command 불가(SSH 는 베스천 경유).
+# v9 (2026-09-23 14:13): 에이전트 설정을 Parameter Store(AmazonCloudWatch-petclinic-web)에서 읽게 — 같은 날 되돌림(파라미터 삭제).
+# v10 (2026-09-23 14:33, 14:40 리프레시 5e20dfdb): 설정 JSON 다시 인라인(v7 방식) + 그룹별 retention_in_days. v9 와는 user data 만 다름.
+#   web 은 Session Manager 가 없어 파라미터를 고쳐도 리프레시가 필요 → Parameter Store 이점 없이 부팅 의존만 늘어서 되돌림.
+#   보존기간을 에이전트가 직접 걸므로 로그 그룹을 미리 만들 필요가 없다 (v9 에서 apache/access 무기한→30일, ssh/access 자동 생성 실측).
 resource "aws_launch_template" "web" {
   name            = "web"
-  description     = "v7: XFF log format, logrotate, prod log groups, rsyslog, disk/mem metrics, root 30GB" # provider 는 최신 버전의 버전 설명을 읽는다
-  default_version = 7
+  description     = "v10: cwagent config inline + retention_in_days (SSM param dropped)" # 최신 버전의 버전 설명
+  default_version = 10
 
   image_id      = aws_ami.web_apache.id
   instance_type = "t3.small"
   key_name      = "test-key"
-  user_data     = base64encode(file("${path.module}/userdata/web-v7.sh"))
+  user_data     = base64encode(file("${path.module}/userdata/web-v10.sh"))
 
   block_device_mappings {
     device_name = "/dev/xvda"
@@ -64,7 +70,7 @@ resource "aws_launch_template" "web" {
   }
 
   iam_instance_profile {
-    name = aws_iam_instance_profile.ec2.name
+    arn = aws_iam_instance_profile.cw_agent.arn # v8 은 이름이 아니라 ARN 으로 지정돼 있다
   }
 
   monitoring {
@@ -91,7 +97,7 @@ resource "aws_autoscaling_group" "web" {
 
   launch_template {
     id      = aws_launch_template.web.id
-    version = "7" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (2026-09-22 6→7, 리프레시 482197d8)
+    version = "10" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (9/22 6→7 리프레시 482197d8, 9/23 8→9 49278dd3, 9→10 5e20dfdb)
   }
 
   # 그룹 지표 전부 켜져 있음
@@ -189,6 +195,30 @@ resource "aws_ami" "was_golden" {
 }
 
 # 골든 이미지 v2 (2026-09-21 18:38 KST, semin): was-gg2 인스턴스(아래)에서 CreateImage. v1 과 같은 구성(루트 20GB 비암호화). 시작 템플릿 v2 가 쓴다.
+# 골든 이미지 v4 (2026-09-22 19:11 KST, semin): was-gg2 에서 CreateImage. CloudWatch Agent 설치 포함. 시작 템플릿 v3·v4 가 쓴다.
+# (같은 날 19:03 의 v3 이미지 ami-0e67b368a44b87813 은 이미 등록 취소돼 없다.)
+resource "aws_ami" "was_golden_v4" {
+  name                = "was-goldenImage-v4"
+  architecture        = "x86_64"
+  virtualization_type = "hvm"
+  root_device_name    = "/dev/xvda"
+  ena_support         = true
+  sriov_net_support   = "simple"
+  boot_mode           = "uefi-preferred"
+  imds_support        = "v2.0"
+
+  ebs_block_device {
+    device_name           = "/dev/xvda"
+    snapshot_id           = "snap-00b515e624b9e2f57"
+    volume_size           = 20
+    volume_type           = "gp3"
+    iops                  = 3000
+    throughput            = 125
+    delete_on_termination = true
+    encrypted             = false
+  }
+}
+
 resource "aws_ami" "was_golden_v2" {
   name                = "was-goldenImage-test-v2"
   architecture        = "x86_64"
@@ -211,15 +241,18 @@ resource "aws_ami" "was_golden_v2" {
   }
 }
 
-# 시작 템플릿 was-lt. 실물은 latest=2, default=1 — ASG 는 $Latest 를 따라가므로 실제 뜨는 건 v2 다. 이 블록은 latest(v2) 의 내용.
+# 시작 템플릿 was-lt. 실물은 latest=4 = default=4, ASG 는 $Latest. 이 블록은 latest(v4) 의 내용.
 # v1 (17:20 KST): AMI was-goldenImage-test, 루트도 KMS 암호화, 설명 "was 웹서버 시작 템플릿".
 # v2 (18:42 KST, semin): AMI was-goldenImage-test-v2 로 교체, 루트 비암호화, /dev/sdf 처리량 미지정, 설명 없음. user data 는 v1 과 동일.
-# t3.medium, 프로파일 was-test-iam(RDS 만 — SSM·CloudWatch 정책 없음). user data 는 /dev/sdf 를 /data 로 마운트하고 Tomcat 기동.
+# v3·v4 (2026-09-22 19:15·19:25 KST, semin): AMI was-goldenImage-v4(에이전트 설치됨) + user data 끝에 CloudWatch Agent 기동
+#   (`fetch-config -c ssm:/petclinic/cwagent/was` — jaewoon 의 Parameter Store 설정). 루트 매핑은 빼고 AMI 기본값, /dev/sdf 만 지정.
+#   19:32~19:44 WAS 2대를 수동 종료 → ASG 가 v4 로 재생성.
+# t3.medium, 프로파일 was-test-iam (RDS·SSM Core·시크릿 읽기 — ⚠️ CloudWatchAgentServerPolicy 없음 → 로그 전송 불가).
 resource "aws_launch_template" "was" {
   name            = "was-lt"
-  default_version = 2 # 2026-09-22 16:14 KST semin: 1 → 2 (ASG 는 $Latest 라 실제 동작엔 변화 없음)
+  default_version = 4
 
-  image_id      = aws_ami.was_golden_v2.id
+  image_id      = aws_ami.was_golden_v4.id
   instance_type = "t3.medium"
   key_name      = "test-key"
   user_data     = base64encode(file("${path.module}/userdata/was-lt.sh"))
@@ -233,18 +266,6 @@ resource "aws_launch_template" "was" {
     security_groups = [aws_security_group.was.id]
   }
 
-  block_device_mappings {
-    device_name = "/dev/xvda"
-    ebs {
-      snapshot_id           = "snap-07a6743c7b1f78155" # = aws_ami.was_golden_v2 의 루트 스냅샷
-      volume_size           = 20
-      volume_type           = "gp3"
-      iops                  = 3000
-      throughput            = 125
-      delete_on_termination = true
-      encrypted             = false
-    }
-  }
   block_device_mappings {
     device_name = "/dev/sdf"
     ebs {
@@ -260,7 +281,7 @@ resource "aws_launch_template" "was" {
   # 콘솔은 KMS 키를 ARN 이 아니라 키 ID("fffaccce-…")로 저장했다. provider 는 ARN 만 받으므로 코드엔 ARN 을 쓰고,
   # 그 표기 차이가 plan 에 "변경" 으로 잡히지 않게 무시한다 (같은 키).
   lifecycle {
-    ignore_changes = [block_device_mappings[1].ebs[0].kms_key_id]
+    ignore_changes = [block_device_mappings[0].ebs[0].kms_key_id]
   }
 }
 
@@ -375,7 +396,7 @@ resource "aws_instance" "bastion" {
   associate_public_ip_address = true
   vpc_security_group_ids      = [aws_security_group.bastion.id]
   key_name                    = "test-key"
-  iam_instance_profile        = aws_iam_instance_profile.bastion.name
+  iam_instance_profile        = aws_iam_instance_profile.cw_agent.name # 2026-09-22 17:36 bastion-role → CloudWatchAgentServerPolicy
   monitoring                  = false
 
   root_block_device {

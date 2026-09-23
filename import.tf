@@ -388,10 +388,6 @@ import {
   id = "arn:aws:sns:ap-northeast-2:723165663216:mc-alerts"
 }
 import {
-  to = aws_sns_topic_subscription.alerts_email
-  id = "arn:aws:sns:ap-northeast-2:723165663216:mc-alerts:ea44ca0d-47cf-47df-99e8-bb7476bcc7fc"
-}
-import {
   to = aws_ami.was_golden
   id = "ami-0bd669bb5ad494b67"
 }
@@ -461,28 +457,16 @@ import {
 
 # --- 2026-09-22 오후: 베스천 전용 역할(CloudWatch 만) + 새 규칙 로그 그룹 5개 (web v7 용 4 + 베스천 1) ---
 import {
-  to = aws_iam_role.bastion
-  id = "bastion-role"
-}
-import {
-  to = aws_iam_role_policy_attachment.bastion_cloudwatch
-  id = "bastion-role/arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
-}
-import {
-  to = aws_iam_instance_profile.bastion
-  id = "bastion-role"
-}
-import {
   to = aws_cloudwatch_log_group.web_apache_access
   id = "/petclinic/prod/web/apache/access"
 }
 import {
-  to = aws_cloudwatch_log_group.web_apache_error
-  id = "/petclinic/prod/web/apache/error"
-}
-import {
   to = aws_cloudwatch_log_group.web_ssh_access
   id = "/petclinic/prod/web/ssh/access"
+}
+import {
+  to = aws_cloudwatch_log_group.web_apache_error
+  id = "/petclinic/prod/web/apache/error"
 }
 import {
   to = aws_cloudwatch_log_group.web_bootstrap
@@ -493,10 +477,45 @@ import {
   id = "/petclinic/prod/bastion/ssh/secure"
 }
 import {
-  to = aws_cloudwatch_log_group.bastion_system_messages
-  id = "/petclinic/prod/bastion/system/messages"
-}
-import {
   to = aws_s3_bucket_lifecycle_configuration.central_logs
   id = "mc-logs-petclinic"
+}
+
+# --- 2026-09-23 동기화: 어젯밤 콘솔 변경 (web LT v8 역할, 베스천 프로파일, WAS AMI v4, Slack 연동, apache/access 재생성) ---
+import {
+  to = aws_iam_role.cw_agent
+  id = "CloudWatchAgentServerPolicy"
+}
+import {
+  to = aws_iam_role_policy_attachment.cw_agent
+  id = "CloudWatchAgentServerPolicy/arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+import {
+  to = aws_iam_instance_profile.cw_agent
+  id = "CloudWatchAgentServerPolicy"
+}
+import {
+  to = aws_iam_role.chatbot
+  id = "chatbot-petclinic-alerts"
+}
+import {
+  to = aws_iam_policy.chatbot_notifications
+  id = "arn:aws:iam::723165663216:policy/service-role/AWS-Chatbot-NotificationsOnly-Policy-f4d7e8f8-6429-4ff2-8088-501c6ecac3f5"
+}
+import {
+  to = aws_iam_role_policy_attachment.chatbot_notifications
+  id = "chatbot-petclinic-alerts/arn:aws:iam::723165663216:policy/service-role/AWS-Chatbot-NotificationsOnly-Policy-f4d7e8f8-6429-4ff2-8088-501c6ecac3f5"
+}
+import {
+  to = aws_iam_role_policy_attachment.chatbot_q
+  id = "chatbot-petclinic-alerts/arn:aws:iam::aws:policy/AmazonQDeveloperAccess"
+}
+import {
+  provider = aws.us_east_2
+  to       = aws_chatbot_slack_channel_configuration.alerts
+  id       = "arn:aws:chatbot::723165663216:chat-configuration/slack-channel/petclinic-alerts"
+}
+import {
+  to = aws_ami.was_golden_v4
+  id = "ami-05368bb9c7fcd8ae5"
 }

@@ -38,5 +38,12 @@ mkdir -p /data/dump /data/logs
 chown -R tomcat:tomcat /data/dump /data/logs
 chmod 0750 /data/dump /data/logs
 
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config \
+  -m ec2 \
+  -c ssm:/petclinic/cwagent/was \
+  -s
+
+systemctl enable amazon-cloudwatch-agent
 systemctl enable tomcat
 systemctl start tomcat

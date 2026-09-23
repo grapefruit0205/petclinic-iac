@@ -1,0 +1,31 @@
+{
+  "agent": {
+    "run_as_user": "root"
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/opt/tomcat/logs/petclinic/application.log",
+            "log_group_name": "/petclinic/prod/was/petclinic/application",
+            "log_stream_name": "{instance_id}",
+            "retention_in_days": 30
+          },
+          {
+            "file_path": "/opt/tomcat/logs/localhost_access_log.*.txt",
+            "log_group_name": "/petclinic/prod/was/tomcat/access",
+            "log_stream_name": "{instance_id}",
+            "retention_in_days": 14
+          },
+          {
+            "file_path": "/opt/tomcat/logs/catalina.*.log",
+            "log_group_name": "/petclinic/prod/was/tomcat/catalina",
+            "log_stream_name": "{instance_id}",
+            "retention_in_days": 30
+          }
+        ]
+      }
+    }
+  }
+}

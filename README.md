@@ -52,7 +52,7 @@ state 가 있으므로 이제 `terraform plan` 은 **코드(2026-09-19 스냅샷
 | IAM | `iam.tf` | 역할 4 (`mc-ec2-role` · `was-test-iam` · `bastion-role` · `rds-monitoring-role`), 프로파일 3, 정책 연결 5, 인라인 정책 1 (`was-test-iam` 의 `PetclinicReadRdsSecret`) |
 | 데이터 | `database.tf` | RDS `database-1`, 파라미터 그룹, 서브넷 그룹 (RDS Proxy 는 2026-09-22 제거 결정 — 코드·state 에서 뺌) |
 | 스토리지·로그 | `storage.tf` | S3 `mc-static-image` + 정책 · 퍼블릭 차단 · 암호화 · 버전 관리, 중앙 로그 버킷 `mc-logs-petclinic`(CloudFront `petclinic/prod/edge/` + ALB `petclinic/prod/entry/`) + 정책 · 퍼블릭 차단 · 수명주기(entry 90일), WAF 로그 버킷 `aws-waf-logs-petclinic-block`(us-east-1) + 정책, 로그 그룹 8 (web 4 · 베스천 2 · RDS 2) |
-| 모니터링 | `monitoring.tf` | SNS 토픽 `mc-alerts` + 이메일 구독, 알람 `alarm-web-reqcount-high-20000` (Public ALB 타깃당 요청수 → web 단계 정책 + 메일) |
+| 모니터링 | `monitoring.tf` | SNS 토픽 `mc-alerts` → Slack `#petclinic-alerts` (Amazon Q Developer in chat applications; 이메일 구독은 9/23 해제), 알람 `alarm-web-reqcount-high-20000` (Public ALB 타깃당 요청수 → web 단계 정책 + Slack) |
 | 엣지 | `edge.tf` | CloudFront 분포 + OAC + Function(`petclinic-home-to-landing`, 코드는 `cloudfront/`), WAF 웹 ACL + 로깅 설정(S3, BLOCK 만), CloudFront 표준 로그 v2 전송 3종(소스·목적지·전송, us-east-1), CloudFront 인증서, Route53 존 + 레코드 3 (A · AAAA · ACM 검증) |
 
 시작 템플릿(v6)과 `web-ami` 인스턴스의 user data 는 `userdata/` 에, CloudFront Function 코드는 `cloudfront/` 에 원문 그대로 있습니다. **바이트가 바뀌면 plan 에 변경으로 잡히니** 손대지 마세요 — 바꾸려면 콘솔에서 새 버전/게시를 만들고 그 원문을 다시 복사합니다.
