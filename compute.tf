@@ -25,7 +25,7 @@ resource "aws_ami" "web_apache" {
   }
 }
 
-# ASG 시작 템플릿. 실물은 latest=10 = default=10. ASG 는 10 을 고정해 쓴다. 이 블록은 latest(10) 의 내용.
+# ASG 시작 템플릿. 목표 상태는 latest=11 = default=11, ASG 는 11 고정. 이 블록은 latest(11) 의 내용.
 # v6 (2026-09-19): user data 에 CloudFront 커스텀 헤더(superheader) 검사 — ALB 직접 접근은 403. (userdata/web.sh 로 보관)
 # v7 (2026-09-22): v6 + access 로그 첫 칸 X-Forwarded-For(사용자 IP)·%D 처리시간, logrotate 3일, rsyslog(/var/log/secure),
 #   로그 그룹 이름 규칙 /petclinic/prod/web/…, 디스크·메모리 지표(PetClinic/WEB), 루트 30GB gp3, 인스턴스·볼륨 태그.
@@ -35,15 +35,18 @@ resource "aws_ami" "web_apache" {
 # v10 (2026-09-23 14:33, 14:40 리프레시 5e20dfdb): 설정 JSON 다시 인라인(v7 방식) + 그룹별 retention_in_days. v9 와는 user data 만 다름.
 #   web 은 Session Manager 가 없어 파라미터를 고쳐도 리프레시가 필요 → Parameter Store 이점 없이 부팅 의존만 늘어서 되돌림.
 #   보존기간을 에이전트가 직접 걸므로 로그 그룹을 미리 만들 필요가 없다 (v9 에서 apache/access 무기한→30일, ssh/access 자동 생성 실측).
+# v11 (2026-09-24): v10 + ProxyPass ttl=55. 부하 테스트 S5 재실행 02:13:00 KST 에 POST 1건 502 — Apache 가 내부 ALB 가 이미 닫은
+#   keep-alive 연결을 재사용(AH01102 error reading status line). 내부 ALB idle timeout 60초보다 짧게 Apache 가 먼저 연결을 정리한다.
+#   12:32 CLI 로 v11 생성·기본 11·ASG 11 → 리프레시 a3ddf313 (12:32~12:36 성공). 12:38 S5 3차에서 AH01102 0건.
 resource "aws_launch_template" "web" {
   name            = "web"
-  description     = "v10: cwagent config inline + retention_in_days (SSM param dropped)" # 최신 버전의 버전 설명
-  default_version = 10
+  description     = "v11: ProxyPass ttl=55 (internal ALB keep-alive 502)" # 최신 버전의 버전 설명 — 콘솔 입력과 글자까지 같아야 plan 이 조용하다
+  default_version = 11
 
   image_id      = aws_ami.web_apache.id
   instance_type = "t3.small"
   key_name      = "test-key"
-  user_data     = base64encode(file("${path.module}/userdata/web-v10.sh"))
+  user_data     = base64encode(file("${path.module}/userdata/web-v11.sh"))
 
   block_device_mappings {
     device_name = "/dev/xvda"
@@ -97,7 +100,7 @@ resource "aws_autoscaling_group" "web" {
 
   launch_template {
     id      = aws_launch_template.web.id
-    version = "10" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (9/22 6→7 리프레시 482197d8, 9/23 8→9 49278dd3, 9→10 5e20dfdb)
+    version = "11" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (9/22 6→7 리프레시 482197d8, 9/23 8→9 49278dd3, 9→10 5e20dfdb, 9/24 10→11)
   }
 
   # 그룹 지표 전부 켜져 있음
@@ -157,7 +160,8 @@ resource "aws_autoscaling_policy" "web_reqcount" {
   policy_type               = "StepScaling"
   adjustment_type           = "ChangeInCapacity"
   metric_aggregation_type   = "Average"
-  estimated_instance_warmup = 300 # 2026-09-22 명시 (없으면 ASG 쿨다운 값에 묶임)
+  estimated_instance_warmup = 300  # 2026-09-22 명시 (없으면 ASG 쿨다운 값에 묶임)
+  enabled                   = true # 2026-09-24 01:23 S5 준비 중 콘솔에서 끔 → 9/24 다시 켬. 끄면 요청 수로는 web 이 늘지 않는다
 
   step_adjustment {
     metric_interval_lower_bound = 0

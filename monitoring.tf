@@ -26,6 +26,7 @@ resource "aws_chatbot_slack_channel_configuration" "alerts" {
 # web 단계 정책(compute.tf web_reqcount) 실행 + Slack 알림(SNS mc-alerts).
 # 통계 Sum (2026-09-23 15:0x kdt5, Average → Sum) — RequestCountPerTarget 은 합계 지표라 Average 면 1분 샘플 평균이 돼 web 2대 기준 667 RPS 가
 # 5분 가야 울렸다. Sum 이면 "타깃당 5분 합계 > 20,000" = 2대 기준 총 134 RPS (부하 테스트에서 web 확장을 검증하려면 필요).
+# 2026-09-24 01:23 kdt5 가 S5 준비 중 콘솔에서 삭제 → 9/24 이 코드 그대로 다시 만듦 (terraform apply -target).
 resource "aws_cloudwatch_metric_alarm" "web_reqcount_high" {
   alarm_name          = "alarm-web-reqcount-high-20000"
   alarm_description   = "WEB ALB RequestCountPerTarget exceeds 20000 for 5 minutes.\nScale out WEB ASG when traffic increases."
