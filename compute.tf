@@ -25,8 +25,8 @@ resource "aws_ami" "web_apache" {
   }
 }
 
-# ASG 시작 템플릿. 목표 상태는 latest=12 = default=12, ASG 는 12 고정. 이 블록은 latest(12) 의 내용.
-# (2026-09-24 코드 먼저 v12 로 올림 — terraform apply -target(LT·ASG) + 인스턴스 리프레시 전까지 plan 에 LT·ASG 변경으로 나온다)
+# ASG 시작 템플릿. 목표 상태는 latest=13 = default=13, ASG 는 13 고정. 이 블록은 latest(13) 의 내용.
+# (2026-09-24 코드 먼저 v13 으로 올림 — terraform apply -target(LT·ASG) + 인스턴스 리프레시 전까지 plan 에 LT·ASG 변경으로 나온다)
 # v6 (2026-09-19): user data 에 CloudFront 커스텀 헤더(superheader) 검사 — ALB 직접 접근은 403. (userdata/web.sh 로 보관)
 # v7 (2026-09-22): v6 + access 로그 첫 칸 X-Forwarded-For(사용자 IP)·%D 처리시간, logrotate 3일, rsyslog(/var/log/secure),
 #   로그 그룹 이름 규칙 /petclinic/prod/web/…, 디스크·메모리 지표(PetClinic/WEB), 루트 30GB gp3, 인스턴스·볼륨 태그.
@@ -41,15 +41,21 @@ resource "aws_ami" "web_apache" {
 #   12:32 CLI 로 v11 생성·기본 11·ASG 11 → 리프레시 a3ddf313 (12:32~12:36 성공). 12:38 S5 3차에서 AH01102 0건.
 # v12 (2026-09-24): v11 + KeepAliveTimeout 65. S5 3차 502 9건은 공개 ALB 가 만든 ELB 502(대상 web, target_status '-', Apache 로그 0) —
 #   Apache(event MPM) 기본 KeepAliveTimeout 5초 < 공개 ALB idle timeout 60초라 Apache 가 막 닫은 연결에 ALB 가 요청을 보냈다.
+#   14:44 apply -target → 리프레시 154ff1bb (14:44~14:47 성공). 새 서버에서 10초 쉰 연결 재사용 확인.
+#   (정정 9/24 16시: 3차 9건은 12:39:00·01·12:40:02 — 매분 00~02초라 원인은 v13 쪽. v12 뒤 15:06:00~02·15:07:00 에도 8건.
+#    KeepAliveTimeout 65 는 AWS 권장값이라 그대로 둔다.)
+# v13 (2026-09-24): v12 + Apache 작업 스레드 1024개(16 × 64)를 부팅 때 미리 띄움. S5 단계 상승(15:05~15:18) ELB 502 2,023건 —
+#   매분 00초 DB 쪽 지연(부하 중 최대 1.7초) 동안 쌓인 요청으로 Apache 프로세스 하나의 스레드(기본 25개)가 다 차면 event MPM 이
+#   그 프로세스의 쉬는 keep-alive 연결을 닫아 ALB 가 보낸 요청이 끊겼다. 00초 지연 자체는 DB 쪽이라 이걸로 없어지지 않는다(502 → 잠깐 느림).
 resource "aws_launch_template" "web" {
   name            = "web"
-  description     = "v12: KeepAliveTimeout 65 (public ALB idle 60s, ELB 502)" # 최신 버전의 버전 설명 — 콘솔 입력과 글자까지 같아야 plan 이 조용하다
-  default_version = 12
+  description     = "v13: 1024 event MPM workers started at boot (16x64) - ELB 502 at minute :00" # 최신 버전의 버전 설명 — 콘솔 입력과 글자까지 같아야 plan 이 조용하다
+  default_version = 13
 
   image_id      = aws_ami.web_apache.id
   instance_type = "t3.small"
   key_name      = "test-key"
-  user_data     = base64encode(file("${path.module}/userdata/web-v12.sh"))
+  user_data     = base64encode(file("${path.module}/userdata/web-v13.sh"))
 
   block_device_mappings {
     device_name = "/dev/xvda"
@@ -103,7 +109,7 @@ resource "aws_autoscaling_group" "web" {
 
   launch_template {
     id      = aws_launch_template.web.id
-    version = "12" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (9/22 6→7 리프레시 482197d8, 9/23 8→9 49278dd3, 9→10 5e20dfdb, 9/24 10→11 a3ddf313, 11→12)
+    version = "13" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (9/22 6→7 리프레시 482197d8, 9/23 8→9 49278dd3, 9→10 5e20dfdb, 9/24 10→11 a3ddf313, 11→12 154ff1bb, 12→13)
   }
 
   # 그룹 지표 전부 켜져 있음
