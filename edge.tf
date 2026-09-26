@@ -219,10 +219,10 @@ resource "aws_cloudfront_distribution" "main" {
     origin_id   = "test-Public-ALB-1734796970.ap-northeast-2.elb.amazonaws.com-mu55v3ecfl1"
     domain_name = aws_lb.public.dns_name
 
-    # ALB 쪽에서 이 헤더를 검사하는 리스너 규칙은 없다 — 설정만 있고 강제되지 않음.
+    # ALB 443 리스너 규칙(entry.tf)과 web Apache 가 이 헤더를 검사한다. 값은 terraform.tfvars 의 cf_origin_secret (커밋 안 함).
     custom_header {
       name  = "superheader"
-      value = "__CF_SECRET__"
+      value = var.cf_origin_secret
     }
 
     custom_origin_config {

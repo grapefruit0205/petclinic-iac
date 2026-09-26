@@ -147,7 +147,7 @@ resource "aws_lb_listener_rule" "public_https_superheader" {
   condition {
     http_header {
       http_header_name = "superheader"
-      values           = ["__CF_SECRET__"]
+      values           = [var.cf_origin_secret]
     }
   }
 }

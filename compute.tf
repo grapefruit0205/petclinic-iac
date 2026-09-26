@@ -57,7 +57,8 @@ resource "aws_launch_template" "web" {
   image_id      = aws_ami.web_apache.id
   instance_type = "t3.small"
   key_name      = "test-key"
-  user_data     = base64encode(file("${path.module}/userdata/web-v13.sh"))
+  # 스크립트의 __CF_SECRET__ 자리에 terraform.tfvars 의 값을 넣는다 → 실물 user data 와 글자까지 같다.
+  user_data = base64encode(replace(file("${path.module}/userdata/web-v13.sh"), "__CF_SECRET__", var.cf_origin_secret))
 
   block_device_mappings {
     device_name = "/dev/xvda"

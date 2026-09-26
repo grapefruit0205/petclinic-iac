@@ -153,3 +153,12 @@ variable "cloudfront_distribution_id" {
   type        = string
   default     = "E1F6M0QDUUT8AG"
 }
+
+# CloudFront 오리진 커스텀 헤더 superheader 값 — CloudFront(edge.tf) 가 붙이고, 공개 ALB 443 리스너 규칙(entry.tf)과
+# web Apache(userdata/web-v13.sh → compute.tf) 가 검사한다. 공개 리포라 값은 terraform.tfvars 에만 둔다(.gitignore).
+variable "cf_origin_secret" {
+  description = "CloudFront → 공개 ALB 확인용 헤더(superheader) 값"
+  type        = string
+  sensitive   = true
+}
+
