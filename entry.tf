@@ -152,22 +152,8 @@ resource "aws_lb_listener_rule" "public_https_superheader" {
   }
 }
 
-# 80 → 443 리다이렉트 (2026-09-21 변경. 그 전엔 forward). CloudFront 는 443 으로만 오고 직접 접근은 어차피 403 이라 실효보다 정리 목적.
-resource "aws_lb_listener" "public_http" {
-  load_balancer_arn = aws_lb.public.arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type = "redirect"
-
-    redirect {
-      protocol    = "HTTPS"
-      port        = "443"
-      status_code = "HTTP_301"
-    }
-  }
-}
+# 80 → 443 리다이렉트 리스너(public_http)는 2026-09-26 00:11 KST yena 가 콘솔에서 삭제 — 공개 ALB 는 443 하나만 연다.
+# (CloudFront 는 443 으로만 오고, 직접 접근은 어차피 403 이었다.)
 
 resource "aws_lb_listener" "internal_http" {
   load_balancer_arn = aws_lb.internal.arn

@@ -19,7 +19,7 @@ resource "aws_acm_certificate" "cloudfront" {
   key_algorithm             = "RSA_2048"
 }
 
-# CloudFront 콘솔이 만든 웹 ACL. ⚠️ 관리형 룰 4개 전부 Count (차단 없음), 로깅 없음.  (rule4 = SQLi, none)
+# CloudFront 콘솔이 만든 웹 ACL. ⚠️ 룰 5개(관리형 4 + Rate) 모두 사실상 Count — 2026-09-24 01:17 부터 차단 0. 로깅은 S3(aws-waf-logs-…, 아래).
 resource "aws_wafv2_web_acl" "cloudfront" {
   provider = aws.us_east_1
 
@@ -96,7 +96,9 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     }
   }
 
-  # 4번째 룰만 none — 앞의 3개는 Count 라 탐지만 하고 차단하지 않는다.
+  # 4번째 룰만 override none — 앞의 3개는 그룹 전체가 Count 라 탐지만 하고 차단하지 않는다.
+  # 2026-09-24 01:17 KST yena: 그룹 안 세부 규칙 5개(= 이 그룹의 전부)를 Count 로 내림 → 이 룰도 탐지만 한다.
+  # 결과적으로 web ACL 은 지금 아무 요청도 차단하지 않는다(5개 룰 모두 Count). S5 1차 실행(01:25) 8분 전.
   rule {
     name     = "AWS-AWSManagedRulesSQLiRuleSet"
     priority = 3
@@ -109,6 +111,37 @@ resource "aws_wafv2_web_acl" "cloudfront" {
       managed_rule_group_statement {
         name        = "AWSManagedRulesSQLiRuleSet"
         vendor_name = "AWS"
+
+        rule_action_override {
+          name = "SQLiExtendedPatterns_QUERYARGUMENTS"
+          action_to_use {
+            count {}
+          }
+        }
+        rule_action_override {
+          name = "SQLi_QUERYARGUMENTS"
+          action_to_use {
+            count {}
+          }
+        }
+        rule_action_override {
+          name = "SQLi_BODY"
+          action_to_use {
+            count {}
+          }
+        }
+        rule_action_override {
+          name = "SQLi_COOKIE"
+          action_to_use {
+            count {}
+          }
+        }
+        rule_action_override {
+          name = "SQLi_URIPATH"
+          action_to_use {
+            count {}
+          }
+        }
       }
     }
 

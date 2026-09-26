@@ -1,0 +1,653 @@
+{
+  "start": "-PT1H",
+  "periodOverride": "inherit",
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 2,
+      "properties": {
+        "markdown": "## PetClinic 부하 테스트 — 위에서 아래로 앞단 → web → WAS → DB\n① 초당 요청이 부하기 JMeter 의 `/s` 와 비슷하면 정상 · **S4**: ② 가 빨간 선(20,000)을 넘음 → ⑥ 알람 → ③ web 2→3대, ④ p95 가 그대로면 성공 · **S5**: ⑧ DB CPU 가 먼저 오른다 · 스톱: ④ p95 3초 2분 지속 · ⑧ DB CPU 90% 지속 · 에러 5%"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 2,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "① 초당 요청 · 에러율 — CloudFront (정적+동적 전체)",
+        "region": "us-east-1",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "metrics": [
+          [
+            {
+              "expression": "m1/PERIOD(m1)",
+              "label": "초당 요청",
+              "id": "e1"
+            }
+          ],
+          [
+            "AWS/CloudFront",
+            "Requests",
+            "DistributionId",
+            "E1F6M0QDUUT8AG",
+            "Region",
+            "Global",
+            {
+              "id": "m1",
+              "stat": "Sum",
+              "visible": false
+            }
+          ],
+          [
+            ".",
+            "5xxErrorRate",
+            ".",
+            ".",
+            ".",
+            ".",
+            {
+              "stat": "Average",
+              "yAxis": "right",
+              "label": "5xx 비율 %"
+            }
+          ],
+          [
+            ".",
+            "4xxErrorRate",
+            ".",
+            ".",
+            ".",
+            ".",
+            {
+              "stat": "Average",
+              "yAxis": "right",
+              "label": "4xx 비율 %"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0
+          },
+          "right": {
+            "min": 0
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 2,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "② web 타깃당 요청 수 (5분 합계) — 알람 기준",
+        "region": "ap-northeast-2",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 300,
+        "metrics": [
+          [
+            "AWS/ApplicationELB",
+            "RequestCountPerTarget",
+            "TargetGroup",
+            "targetgroup/Targetgroup-web/6967a229da5789ea",
+            "LoadBalancer",
+            "app/test-Public-ALB/2a2b6cc29a7f91ce",
+            {
+              "stat": "Sum",
+              "label": "타깃당 요청 (5분 합계)"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0
+          },
+          "right": {
+            "min": 0
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "알람 기준 20,000",
+              "value": 20000,
+              "color": "#d62728"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 2,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "③ web 대수 · CPU",
+        "region": "ap-northeast-2",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/AutoScaling",
+            "GroupDesiredCapacity",
+            "AutoScalingGroupName",
+            "web-test",
+            {
+              "stat": "Maximum",
+              "label": "원하는 대수"
+            }
+          ],
+          [
+            ".",
+            "GroupInServiceInstances",
+            ".",
+            ".",
+            {
+              "stat": "Maximum",
+              "label": "서비스 중 대수"
+            }
+          ],
+          [
+            "AWS/EC2",
+            "CPUUtilization",
+            "AutoScalingGroupName",
+            "web-test",
+            {
+              "stat": "Average",
+              "yAxis": "right",
+              "label": "web CPU % (평균)"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 5
+          },
+          "right": {
+            "min": 0,
+            "max": 100
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 8,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "④ 앞단 응답 시간 p95 (초) · 5xx 건수 — Public ALB",
+        "region": "ap-northeast-2",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/ApplicationELB",
+            "TargetResponseTime",
+            "LoadBalancer",
+            "app/test-Public-ALB/2a2b6cc29a7f91ce",
+            {
+              "stat": "p95",
+              "label": "응답 p95 (초)"
+            }
+          ],
+          [
+            ".",
+            "HTTPCode_Target_5XX_Count",
+            ".",
+            ".",
+            {
+              "stat": "Sum",
+              "yAxis": "right",
+              "label": "5xx — web 이 응답"
+            }
+          ],
+          [
+            ".",
+            "HTTPCode_ELB_5XX_Count",
+            ".",
+            ".",
+            {
+              "stat": "Sum",
+              "yAxis": "right",
+              "label": "5xx — ALB 가 응답(502·503·504)"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0
+          },
+          "right": {
+            "min": 0
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "S3 합격선 2초",
+              "value": 2,
+              "color": "#ff7f0e"
+            },
+            {
+              "label": "스톱 3초",
+              "value": 3,
+              "color": "#d62728"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 8,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "⑤ WAS — 내부 ALB 응답 p95 (초) · 비정상 대수",
+        "region": "ap-northeast-2",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/ApplicationELB",
+            "TargetResponseTime",
+            "LoadBalancer",
+            "app/alb-internal-test/20aa87b0752aa8c0",
+            {
+              "stat": "p95",
+              "label": "WAS 응답 p95 (초)"
+            }
+          ],
+          [
+            ".",
+            "UnHealthyHostCount",
+            "TargetGroup",
+            "targetgroup/tg-internal-alb/e7c1dae7ffcd55ee",
+            "LoadBalancer",
+            "app/alb-internal-test/20aa87b0752aa8c0",
+            {
+              "stat": "Maximum",
+              "yAxis": "right",
+              "label": "비정상 WAS 대수"
+            }
+          ],
+          [
+            ".",
+            "HealthyHostCount",
+            ".",
+            ".",
+            ".",
+            ".",
+            {
+              "stat": "Minimum",
+              "yAxis": "right",
+              "label": "정상 WAS 대수"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0
+          },
+          "right": {
+            "min": 0,
+            "max": 5
+          }
+        }
+      }
+    },
+    {
+      "type": "alarm",
+      "x": 16,
+      "y": 8,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "⑥ 알람 상태 — 증설 신호",
+        "alarms": [
+          "arn:aws:cloudwatch:ap-northeast-2:723165663216:alarm:alarm-web-reqcount-high-20000",
+          "arn:aws:cloudwatch:ap-northeast-2:723165663216:alarm:TargetTracking-web-test-AlarmHigh-2ef254c7-3149-4150-b4cd-3ceff1ac1c10",
+          "arn:aws:cloudwatch:ap-northeast-2:723165663216:alarm:TargetTracking-was-asg-AlarmHigh-ec38ed67-77ff-4d42-afc6-a2cabd6622d1"
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 14,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "⑦ WAS CPU % (5분에 한 점)",
+        "region": "ap-northeast-2",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 300,
+        "metrics": [
+          [
+            "AWS/EC2",
+            "CPUUtilization",
+            "AutoScalingGroupName",
+            "was-asg",
+            {
+              "stat": "Average",
+              "label": "WAS CPU % (평균)"
+            }
+          ],
+          [
+            "...",
+            {
+              "stat": "Maximum",
+              "label": "WAS CPU % (가장 높은 1대)"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 100
+          },
+          "right": {
+            "min": 0
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "WAS 증설 기준 50%",
+              "value": 50,
+              "color": "#ff7f0e"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 14,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "⑧ DB CPU % · 연결 수",
+        "region": "ap-northeast-2",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/RDS",
+            "CPUUtilization",
+            "DBInstanceIdentifier",
+            "database-1",
+            {
+              "stat": "Average",
+              "label": "DB CPU %"
+            }
+          ],
+          [
+            ".",
+            "DatabaseConnections",
+            ".",
+            ".",
+            {
+              "stat": "Maximum",
+              "yAxis": "right",
+              "label": "DB 연결 수"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 100
+          },
+          "right": {
+            "min": 0
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "스톱 90%",
+              "value": 90,
+              "color": "#d62728"
+            },
+            {
+              "label": "연결 천장 40 (WAS 2대 × 풀 20)",
+              "value": 40,
+              "color": "#ff7f0e",
+              "yAxis": "right"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 14,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "⑨ DB 지연 (초) · 대기열",
+        "region": "ap-northeast-2",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/RDS",
+            "WriteLatency",
+            "DBInstanceIdentifier",
+            "database-1",
+            {
+              "stat": "Average",
+              "label": "쓰기 지연 (초)"
+            }
+          ],
+          [
+            ".",
+            "ReadLatency",
+            ".",
+            ".",
+            {
+              "stat": "Average",
+              "label": "읽기 지연 (초)"
+            }
+          ],
+          [
+            ".",
+            "DiskQueueDepth",
+            ".",
+            ".",
+            {
+              "stat": "Average",
+              "yAxis": "right",
+              "label": "디스크 대기열"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0
+          },
+          "right": {
+            "min": 0
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 20,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "⑩ WAF — 차단 · 레이트 룰 감지 (분당 건수)",
+        "region": "us-east-1",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/WAFV2",
+            "BlockedRequests",
+            "WebACL",
+            "CreatedByCloudFront-2407cc5b",
+            "Rule",
+            "ALL",
+            {
+              "stat": "Sum",
+              "label": "차단 (전체 규칙)"
+            }
+          ],
+          [
+            ".",
+            "CountedRequests",
+            ".",
+            ".",
+            ".",
+            "Rate-based-Rule",
+            {
+              "stat": "Sum",
+              "label": "레이트 룰 감지 (Count — 차단 안 함)"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0
+          },
+          "right": {
+            "min": 0
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 20,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "⑪ DB 쓰기 IOPS · CPU 크레딧",
+        "region": "ap-northeast-2",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/RDS",
+            "WriteIOPS",
+            "DBInstanceIdentifier",
+            "database-1",
+            {
+              "stat": "Average",
+              "label": "쓰기 IOPS"
+            }
+          ],
+          [
+            ".",
+            "CPUCreditBalance",
+            ".",
+            ".",
+            {
+              "stat": "Minimum",
+              "yAxis": "right",
+              "label": "CPU 크레딧 잔량"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0
+          },
+          "right": {
+            "min": 0
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 26,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "⑫ WAS — 타깃당 요청 수 · 대수 (증설이 일어나는가)",
+        "region": "ap-northeast-2",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/ApplicationELB",
+            "RequestCountPerTarget",
+            "TargetGroup",
+            "targetgroup/tg-internal-alb/e7c1dae7ffcd55ee",
+            "LoadBalancer",
+            "app/alb-internal-test/20aa87b0752aa8c0",
+            {
+              "stat": "Sum",
+              "label": "WAS 타깃당 요청 (분합계)"
+            }
+          ],
+          [
+            "AWS/AutoScaling",
+            "GroupDesiredCapacity",
+            "AutoScalingGroupName",
+            "was-asg",
+            {
+              "stat": "Maximum",
+              "yAxis": "right",
+              "label": "WAS 원하는 대수"
+            }
+          ],
+          [
+            ".",
+            "GroupInServiceInstances",
+            ".",
+            ".",
+            {
+              "stat": "Maximum",
+              "yAxis": "right",
+              "label": "WAS 서비스 중 대수"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0
+          },
+          "right": {
+            "min": 0,
+            "max": 6
+          }
+        }
+      }
+    }
+  ]
+}

@@ -170,10 +170,6 @@ import {
   id = "arn:aws:elasticloadbalancing:ap-northeast-2:723165663216:listener/app/test-Public-ALB/2a2b6cc29a7f91ce/15e27bd1afbd16e3"
 }
 import {
-  to = aws_lb_listener.public_http
-  id = "arn:aws:elasticloadbalancing:ap-northeast-2:723165663216:listener/app/test-Public-ALB/2a2b6cc29a7f91ce/c65bdbbdd8bd10ec"
-}
-import {
   to = aws_lb_listener.internal_http
   id = "arn:aws:elasticloadbalancing:ap-northeast-2:723165663216:listener/app/alb-internal-test/20aa87b0752aa8c0/e903df3d7f813ef2"
 }
@@ -253,10 +249,6 @@ import {
 import {
   to = aws_iam_role_policy_attachment.ec2_ssm
   id = "mc-ec2-role/arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-import {
-  to = aws_iam_role_policy_attachment.was_rds
-  id = "was-test-iam/arn:aws:iam::aws:policy/AmazonRDSFullAccess"
 }
 import {
   to = aws_iam_role_policy_attachment.rds_monitoring
@@ -518,4 +510,185 @@ import {
 import {
   to = aws_ami.was_golden_v4
   id = "ami-05368bb9c7fcd8ae5"
+}
+
+# --- 2026-09-24 동기화: 팀원 콘솔 변경 (WAS 이미지 v5 · 감사 로그 · 로그 그룹 · WAS 역할 정책 · web-iam · us-east-1 알람 · CloudTrail) ---
+import {
+  to = aws_ami.was_golden_v5
+  id = "ami-00713416984fcd011"
+}
+import {
+  to = aws_db_option_group.audit
+  id = "mysql80-custom-auditlogs"
+}
+import {
+  to = aws_cloudwatch_log_group.rds_audit
+  id = "/aws/rds/instance/database-1/audit"
+}
+import {
+  to = aws_cloudwatch_log_group.was_application
+  id = "/petclinic/prod/was/petclinic/application"
+}
+import {
+  to = aws_cloudwatch_log_group.was_tomcat_access
+  id = "/petclinic/prod/was/tomcat/access"
+}
+import {
+  to = aws_cloudwatch_log_group.was_tomcat_catalina
+  id = "/petclinic/prod/was/tomcat/catalina"
+}
+import {
+  to = aws_iam_role_policy_attachment.was_ssm
+  id = "was-test-iam/arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+import {
+  to = aws_iam_role_policy_attachment.was_cloudwatch
+  id = "was-test-iam/arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+import {
+  to = aws_iam_role.web
+  id = "web-iam"
+}
+import {
+  to = aws_iam_role_policy_attachment.web_cloudwatch
+  id = "web-iam/arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+import {
+  to = aws_iam_instance_profile.web
+  id = "web-iam"
+}
+import {
+  provider = aws.us_east_1
+  to       = aws_sns_topic.cf_5xx
+  id       = "arn:aws:sns:us-east-1:723165663216:CF-5xxerror-alerts"
+}
+import {
+  provider = aws.us_east_1
+  to       = aws_sns_topic.waf_block
+  id       = "arn:aws:sns:us-east-1:723165663216:WAF-Block-Alert"
+}
+import {
+  provider = aws.us_east_1
+  to       = aws_cloudwatch_metric_alarm.cf_5xx
+  id       = "CF-Prod-5xxError-Spike"
+}
+import {
+  provider = aws.us_east_1
+  to       = aws_cloudwatch_metric_alarm.waf_block
+  id       = "WAF-Block-Alert"
+}
+import {
+  to = aws_s3_bucket.cloudtrail
+  id = "bespin-cloudtrail-logs"
+}
+import {
+  to = aws_s3_bucket_policy.cloudtrail
+  id = "bespin-cloudtrail-logs"
+}
+import {
+  to = aws_s3_bucket_server_side_encryption_configuration.cloudtrail
+  id = "bespin-cloudtrail-logs"
+}
+import {
+  to = aws_s3_bucket_public_access_block.cloudtrail
+  id = "bespin-cloudtrail-logs"
+}
+import {
+  to = aws_cloudtrail.main
+  id = "arn:aws:cloudtrail:ap-northeast-2:723165663216:trail/cloud-logs-all"
+}
+import {
+  to = aws_cloudwatch_dashboard.traffic
+  id = "PetClinic-Traffic-Dashboard"
+}
+
+# --- RDS 감사 로그 파이프라인 (2026-09-24 jaewoon 콘솔: Firehose · 전용 버킷 · 역할) ---
+import {
+  to = aws_s3_bucket.rds_audit
+  id = "rds-audit-bespin-723165663216-ap-northeast-2-an"
+}
+import {
+  to = aws_s3_bucket_server_side_encryption_configuration.rds_audit
+  id = "rds-audit-bespin-723165663216-ap-northeast-2-an"
+}
+import {
+  to = aws_s3_bucket_lifecycle_configuration.rds_audit
+  id = "rds-audit-bespin-723165663216-ap-northeast-2-an"
+}
+import {
+  to = aws_s3_bucket_public_access_block.rds_audit
+  id = "rds-audit-bespin-723165663216-ap-northeast-2-an"
+}
+import {
+  to = aws_cloudwatch_log_group.firehose_rds_audit
+  id = "/aws/kinesisfirehose/RDS-Audit-PUT-S3"
+}
+import {
+  to = aws_iam_role.firehose_rds_audit
+  id = "KinesisFirehoseServiceRole-RDS-Audi-ap-northeast-2-1790239262890"
+}
+import {
+  to = aws_iam_policy.firehose_rds_audit["central_logs"]
+  id = "arn:aws:iam::723165663216:policy/service-role/KinesisFirehoseServicePolicy-RDS-Audit-PUT-S3-ap-northeast-2"
+}
+import {
+  to = aws_iam_policy.firehose_rds_audit["rds_audit"]
+  id = "arn:aws:iam::723165663216:policy/service-role/KinesisFirehoseServicePolicy-RDS-Audit-PUT-S3-ap-northeast-2-alt"
+}
+import {
+  to = aws_iam_role_policy_attachment.firehose_rds_audit["rds_audit"]
+  id = "KinesisFirehoseServiceRole-RDS-Audi-ap-northeast-2-1790239262890/arn:aws:iam::723165663216:policy/service-role/KinesisFirehoseServicePolicy-RDS-Audit-PUT-S3-ap-northeast-2-alt"
+}
+import {
+  to = aws_kinesis_firehose_delivery_stream.rds_audit
+  id = "arn:aws:firehose:ap-northeast-2:723165663216:deliverystream/RDS-Audit-PUT-S3"
+}
+
+# --- 2026-09-24 밤 ~ 09-26 콘솔 변경 (CloudTrail 로 확인) ---
+# 감사 로그 → Firehose 구독 필터와 그 역할 (jaewoon 9/24 23:44)
+import {
+  to = aws_iam_role.logs_to_firehose
+  id = "CloudWatchLogsToFirehoseRole"
+}
+import {
+  to = aws_iam_policy.logs_to_firehose
+  id = "arn:aws:iam::723165663216:policy/CloudWatchLogsToFirehoseRolePolicy"
+}
+import {
+  to = aws_iam_role_policy_attachment.logs_to_firehose
+  id = "CloudWatchLogsToFirehoseRole/arn:aws:iam::723165663216:policy/CloudWatchLogsToFirehoseRolePolicy"
+}
+import {
+  to = aws_cloudwatch_log_subscription_filter.rds_audit
+  id = "/aws/rds/instance/database-1/audit|rds-audit"
+}
+# AWS Backup (jaewoon 9/25 16:00~16:06)
+import {
+  to = aws_backup_vault.rds
+  id = "rds-backup-vault"
+}
+import {
+  to = aws_backup_plan.rds
+  id = "7895b7e5-43a4-4660-9c1d-66cca63d9232"
+}
+import {
+  to = aws_backup_selection.rds
+  id = "7895b7e5-43a4-4660-9c1d-66cca63d9232|29c09e80-bedd-4a14-9a03-3023996c1da8"
+}
+import {
+  to = aws_iam_role.backup
+  id = "AWSBackupDefaultServiceRole"
+}
+import {
+  to = aws_iam_role_policy_attachment.backup["arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"]
+  id = "AWSBackupDefaultServiceRole/arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+}
+import {
+  to = aws_iam_role_policy_attachment.backup["arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"]
+  id = "AWSBackupDefaultServiceRole/arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"
+}
+# 부하 테스트 대시보드 (kdt5 9/26)
+import {
+  to = aws_cloudwatch_dashboard.loadtest
+  id = "petclinic-loadtest"
 }

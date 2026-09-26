@@ -1,4 +1,4 @@
-# 컴퓨트 계층 — 골든 AMI 3개(web·was v1·was v2), 시작 템플릿 2개, ASG 2개 + 스케일링 정책, 단독 인스턴스 5대, WAS 데이터 볼륨.
+# 컴퓨트 계층 — 골든 AMI 5개(web · was test·v2·v4·v5), 시작 템플릿 2개, ASG 2개 + 스케일링 정책, 단독 인스턴스 5대, WAS 데이터 볼륨.
 # 키페어 `test-key` 는 퍼블릭 키를 API 로 못 읽어 import 할 수 없다 → 이름만 문자열로 쓴다.
 
 # web-ami 인스턴스(i-0c205c2e12ea8e389)에서 CreateImage 로 만든 골든 이미지. ASG 시작 템플릿 전 버전이 쓴다.
@@ -25,8 +25,7 @@ resource "aws_ami" "web_apache" {
   }
 }
 
-# ASG 시작 템플릿. 목표 상태는 latest=13 = default=13, ASG 는 13 고정. 이 블록은 latest(13) 의 내용.
-# (2026-09-24 코드 먼저 v13 으로 올림 — terraform apply -target(LT·ASG) + 인스턴스 리프레시 전까지 plan 에 LT·ASG 변경으로 나온다)
+# ASG 시작 템플릿. 실물은 latest=14 · default=13, ASG 는 13 고정. 이 블록은 latest(14) 의 내용 — provider 는 최신 버전을 읽는다.
 # v6 (2026-09-19): user data 에 CloudFront 커스텀 헤더(superheader) 검사 — ALB 직접 접근은 403. (userdata/web.sh 로 보관)
 # v7 (2026-09-22): v6 + access 로그 첫 칸 X-Forwarded-For(사용자 IP)·%D 처리시간, logrotate 3일, rsyslog(/var/log/secure),
 #   로그 그룹 이름 규칙 /petclinic/prod/web/…, 디스크·메모리 지표(PetClinic/WEB), 루트 30GB gp3, 인스턴스·볼륨 태그.
@@ -47,9 +46,12 @@ resource "aws_ami" "web_apache" {
 # v13 (2026-09-24): v12 + Apache 작업 스레드 1024개(16 × 64)를 부팅 때 미리 띄움. S5 단계 상승(15:05~15:18) ELB 502 2,023건 —
 #   매분 00초 DB 쪽 지연(부하 중 최대 1.7초) 동안 쌓인 요청으로 Apache 프로세스 하나의 스레드(기본 25개)가 다 차면 event MPM 이
 #   그 프로세스의 쉬는 keep-alive 연결을 닫아 ALB 가 보낸 요청이 끊겼다. 00초 지연 자체는 DB 쪽이라 이걸로 없어지지 않는다(502 → 잠깐 느림).
+#   17:34 apply -target → 리프레시 fa39dcce (17:34~17:38 성공). 18:38 S5 재실행에서 502 2,023 → 1건.
+#   버전 설명 "v13: 1024 event MPM workers started at boot (16x64) - ELB 502 at minute :00".
+# v14 (2026-09-24 19:59 KST, yena 콘솔): v13 과 user data·나머지 동일, 인스턴스 프로파일만 CloudWatchAgentServerPolicy → web-iam
+#   (새 역할, 권한은 같은 CloudWatch Agent 정책 하나 — iam.tf). 버전 설명 없음. 기본 버전·ASG 는 아직 13 이라 떠 있는 web 은 v13.
 resource "aws_launch_template" "web" {
   name            = "web"
-  description     = "v13: 1024 event MPM workers started at boot (16x64) - ELB 502 at minute :00" # 최신 버전의 버전 설명 — 콘솔 입력과 글자까지 같아야 plan 이 조용하다
   default_version = 13
 
   image_id      = aws_ami.web_apache.id
@@ -82,7 +84,7 @@ resource "aws_launch_template" "web" {
   }
 
   iam_instance_profile {
-    arn = aws_iam_instance_profile.cw_agent.arn # v8 은 이름이 아니라 ARN 으로 지정돼 있다
+    arn = aws_iam_instance_profile.web.arn # v14. v8~v13 은 cw_agent 프로파일 (이름이 아니라 ARN 으로 지정)
   }
 
   monitoring {
@@ -109,7 +111,7 @@ resource "aws_autoscaling_group" "web" {
 
   launch_template {
     id      = aws_launch_template.web.id
-    version = "13" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (9/22 6→7 리프레시 482197d8, 9/23 8→9 49278dd3, 9→10 5e20dfdb, 9/24 10→11 a3ddf313, 11→12 154ff1bb, 12→13)
+    version = "13" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (9/22 6→7 리프레시 482197d8, 9/23 8→9 49278dd3, 9→10 5e20dfdb, 9/24 10→11 a3ddf313, 11→12 154ff1bb, 12→13 fa39dcce)
   }
 
   # 그룹 지표 전부 켜져 있음
@@ -232,6 +234,30 @@ resource "aws_ami" "was_golden_v4" {
   }
 }
 
+# 골든 이미지 v5 (2026-09-24 15:21 KST, semin): was-gg2 에서 CreateImage(재부팅). WAR 에 커넥션 풀 maxActive 20 · maxIdle 10 ·
+# validationQuery `SELECT 1` 반영 (부하 테스트 S5 1차의 "Too many connections" 대책을 이미지에 굳힘). 시작 템플릿 v6 이 쓴다.
+resource "aws_ami" "was_golden_v5" {
+  name                = "was-goldenImage-v5"
+  architecture        = "x86_64"
+  virtualization_type = "hvm"
+  root_device_name    = "/dev/xvda"
+  ena_support         = true
+  sriov_net_support   = "simple"
+  boot_mode           = "uefi-preferred"
+  imds_support        = "v2.0"
+
+  ebs_block_device {
+    device_name           = "/dev/xvda"
+    snapshot_id           = "snap-0194f87a30c60cc6c"
+    volume_size           = 20
+    volume_type           = "gp3"
+    iops                  = 3000
+    throughput            = 125
+    delete_on_termination = true
+    encrypted             = false
+  }
+}
+
 resource "aws_ami" "was_golden_v2" {
   name                = "was-goldenImage-test-v2"
   architecture        = "x86_64"
@@ -254,21 +280,29 @@ resource "aws_ami" "was_golden_v2" {
   }
 }
 
-# 시작 템플릿 was-lt. 실물은 latest=4 = default=4, ASG 는 $Latest. 이 블록은 latest(v4) 의 내용.
+# 시작 템플릿 was-lt. 실물은 latest=6 · default=5, ASG 는 $Latest(= v6). 이 블록은 latest(v6) 의 내용 — provider 는 최신 버전을 읽는다.
 # v1 (17:20 KST): AMI was-goldenImage-test, 루트도 KMS 암호화, 설명 "was 웹서버 시작 템플릿".
 # v2 (18:42 KST, semin): AMI was-goldenImage-test-v2 로 교체, 루트 비암호화, /dev/sdf 처리량 미지정, 설명 없음. user data 는 v1 과 동일.
 # v3·v4 (2026-09-22 19:15·19:25 KST, semin): AMI was-goldenImage-v4(에이전트 설치됨) + user data 끝에 CloudWatch Agent 기동
 #   (`fetch-config -c ssm:/petclinic/cwagent/was` — jaewoon 의 Parameter Store 설정). 루트 매핑은 빼고 AMI 기본값, /dev/sdf 만 지정.
 #   19:32~19:44 WAS 2대를 수동 종료 → ASG 가 v4 로 재생성.
-# t3.medium, 프로파일 was-test-iam (RDS·SSM Core·시크릿 읽기 — ⚠️ CloudWatchAgentServerPolicy 없음 → 로그 전송 불가).
+# v5 (2026-09-24 14:56 KST, semin): v4 + 세부 모니터링(1분 CPU) 켬 — 부하 테스트 S5 에서 5분 지표로는 2분 단계를 못 나눠서. 기본 버전 5.
+# v6 (2026-09-24 15:25 KST, semin): v5 + AMI was-goldenImage-v5(풀 20). 기본 버전은 5 그대로 두고 ASG 가 $Latest 라 새 WAS 는 v6.
+#   15:27~15:31 WAS 2대 교체 → 10.0.21.37 · 10.0.20.190. user data 는 v4~v6 모두 같다.
+# t3.medium, 프로파일 was-test-iam (시크릿 읽기 · SSM Core · CloudWatch Agent — iam.tf).
 resource "aws_launch_template" "was" {
   name            = "was-lt"
-  default_version = 4
+  default_version = 5
 
-  image_id      = aws_ami.was_golden_v4.id
+  image_id      = aws_ami.was_golden_v5.id
   instance_type = "t3.medium"
   key_name      = "test-key"
   user_data     = base64encode(file("${path.module}/userdata/was-lt.sh"))
+
+  # v5 부터 세부 모니터링(1분 지표).
+  monitoring {
+    enabled = true
+  }
 
   iam_instance_profile {
     arn = aws_iam_instance_profile.was.arn

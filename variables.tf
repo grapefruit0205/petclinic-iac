@@ -135,6 +135,10 @@ variable "log_group_names" {
   default = [
     "/aws/rds/instance/database-1/error",
     "/aws/rds/instance/database-1/slowquery",
+    "/aws/rds/instance/database-1/audit",
+    "/petclinic/prod/was/petclinic/application",
+    "/petclinic/prod/was/tomcat/access",
+    "/petclinic/prod/was/tomcat/catalina",
     "/petclinic/prod/web/apache/access",
     "/petclinic/prod/web/apache/error",
     "/petclinic/prod/web/ssh/access",

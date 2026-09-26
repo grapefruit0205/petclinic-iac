@@ -1,4 +1,4 @@
-# 스토리지 · 로그 — 정적 자원 버킷(CloudFront OAC 전용), 로그 버킷 2개(중앙 = CloudFront + ALB · WAF) + 정책·수명주기, CloudWatch 로그 그룹 7개(web 4 + 베스천 1 + RDS 2).
+# 스토리지 · 로그 — 정적 자원 버킷(CloudFront OAC 전용), 로그 버킷 3개(중앙 = CloudFront + ALB · WAF · CloudTrail) + 정책·수명주기, CloudWatch 로그 그룹 11개(web 4 + 베스천 1 + RDS 3 + WAS 3).
 
 resource "aws_s3_bucket" "static" {
   bucket = "mc-static-image"
@@ -103,15 +103,61 @@ resource "aws_cloudwatch_log_group" "bastion_ssh_secure" {
 }
 
 
-# RDS 쪽 2개는 보존기간 없음(0 = 만료 안 됨). (/aws/rds/proxy/pet-proxy 는 프록시와 함께 2026-09-22 삭제)
+# RDS error·slowquery — 2026-09-25 00:58·01:01 KST jaewoon 이 보존 30일로 바꿈 (그 전엔 0 = 만료 안 됨).
+# (/aws/rds/proxy/pet-proxy 는 프록시와 함께 2026-09-22 삭제)
 resource "aws_cloudwatch_log_group" "rds_error" {
   name              = "/aws/rds/instance/database-1/error"
-  retention_in_days = 0
+  retention_in_days = 30
 }
 
 resource "aws_cloudwatch_log_group" "rds_slowquery" {
   name              = "/aws/rds/instance/database-1/slowquery"
+  retention_in_days = 30
+}
+
+# 감사 로그 — 2026-09-24 14:56 옵션 그룹 연결 때 RDS 가 자동 생성(무기한), 16:20 KST jaewoon 이 30일로 줄임 (모든 쿼리가 남아 양이 많다).
+resource "aws_cloudwatch_log_group" "rds_audit" {
+  name              = "/aws/rds/instance/database-1/audit"
+  retention_in_days = 30
+}
+
+# 감사 로그 → Firehose RDS-Audit-PUT-S3 → 전용 버킷. 2026-09-24 23:44 KST jaewoon 콘솔 생성 (역할 iam.tf logs_to_firehose).
+# ⚠️ 2026-09-25 00:56 RDS 의 audit 로그 내보내기를 꺼서(database.tf) 지금은 이 그룹에 새 로그가 안 들어온다 → 파이프라인은 대기 상태.
+resource "aws_cloudwatch_log_subscription_filter" "rds_audit" {
+  name            = "rds-audit"
+  log_group_name  = aws_cloudwatch_log_group.rds_audit.name
+  filter_pattern  = ""
+  destination_arn = aws_kinesis_firehose_delivery_stream.rds_audit.arn
+  role_arn        = aws_iam_role.logs_to_firehose.arn
+  distribution    = "ByLogStream"
+}
+
+# Firehose RDS-Audit-PUT-S3(monitoring.tf) 의 전송 오류 로그 — 2026-09-24 20:40 KST jaewoon 이 Firehose 를 만들 때 콘솔이 생성(무기한).
+# 스트림 DestinationDelivery·BackupDelivery 도 콘솔이 함께 만든 것이라 코드로 관리하지 않는다.
+resource "aws_cloudwatch_log_group" "firehose_rds_audit" {
+  name              = "/aws/kinesisfirehose/RDS-Audit-PUT-S3"
   retention_in_days = 0
+  log_group_class   = "STANDARD"
+}
+
+# WAS 3개 — 2026-09-23 23:31 KST WAS 의 CloudWatch Agent 가 자동 생성 (semin 이 23:30 역할에 에이전트 정책을 붙인 직후).
+# 에이전트 설정(Parameter Store /petclinic/cwagent/was)에 보존기간이 없어 무기한. 태그 없음.
+resource "aws_cloudwatch_log_group" "was_application" {
+  name              = "/petclinic/prod/was/petclinic/application"
+  retention_in_days = 0
+  log_group_class   = "STANDARD"
+}
+
+resource "aws_cloudwatch_log_group" "was_tomcat_access" {
+  name              = "/petclinic/prod/was/tomcat/access"
+  retention_in_days = 0
+  log_group_class   = "STANDARD"
+}
+
+resource "aws_cloudwatch_log_group" "was_tomcat_catalina" {
+  name              = "/petclinic/prod/was/tomcat/catalina"
+  retention_in_days = 0
+  log_group_class   = "STANDARD"
 }
 
 # (ALB 전용 로그 버킷 petclinic-log-alb 는 2026-09-22 16:23 삭제 — ALB 로그는 아래 중앙 버킷 petclinic/prod/entry/ 로 이동.)
@@ -201,7 +247,7 @@ resource "aws_s3_bucket_policy" "central_logs" {
   })
 }
 
-# 접두사별 보존. edge(CloudFront) 쪽 규칙은 아직 콘솔에서 안 만듦 — 만들면 여기 rule 추가 + plan.
+# 접두사별 보존: entry(ALB) 90일 · edge(CloudFront) 14일.
 resource "aws_s3_bucket_lifecycle_configuration" "central_logs" {
   bucket = aws_s3_bucket.central_logs.id
 
@@ -215,6 +261,24 @@ resource "aws_s3_bucket_lifecycle_configuration" "central_logs" {
 
     expiration {
       days = 90
+    }
+  }
+
+  # 2026-09-24 17:38 KST yena 콘솔 추가. 멀티파트 업로드 조각도 7일 뒤 정리.
+  rule {
+    id     = "Delete-CF-Logs-After-14-Days"
+    status = "Enabled"
+
+    filter {
+      prefix = "petclinic/prod/edge/"
+    }
+
+    expiration {
+      days = 14
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
     }
   }
 }
@@ -274,6 +338,116 @@ resource "aws_s3_bucket_policy" "waf_logs" {
 resource "aws_s3_bucket_public_access_block" "waf_logs" {
   provider = aws.us_east_1
   bucket   = aws_s3_bucket.waf_logs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# --- CloudTrail 버킷 (2026-09-23 22:08 KST jaewoon 콘솔 생성) — 트레일 cloud-logs-all(monitoring.tf) 전용 ---
+# 정책 2문장은 트레일 만들 때 콘솔이 자동으로 넣은 것(Sid 의 UUID 포함 그대로). 수명주기 없음 = 로그 무기한 보관.
+# 객체 소유권 BucketOwnerEnforced(ACL 끔)·SSE-C 차단은 콘솔 기본값이라 코드에 두지 않는다.
+resource "aws_s3_bucket" "cloudtrail" {
+  bucket = "bespin-cloudtrail-logs"
+}
+
+resource "aws_s3_bucket_policy" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AWSCloudTrailAclCheck20150319-7dfabc2a-8080-4a5d-b261-fda9a5e58256"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "s3:GetBucketAcl"
+        Resource  = aws_s3_bucket.cloudtrail.arn
+        Condition = {
+          StringEquals = { "AWS:SourceArn" = "arn:aws:cloudtrail:ap-northeast-2:723165663216:trail/cloud-logs-all" }
+        }
+      },
+      {
+        Sid       = "AWSCloudTrailWrite20150319-a0e7310e-ec54-4e16-b8d6-64ebf64e1229"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.cloudtrail.arn}/AWSLogs/723165663216/*"
+        Condition = {
+          StringEquals = {
+            "s3:x-amz-acl"  = "bucket-owner-full-control"
+            "AWS:SourceArn" = "arn:aws:cloudtrail:ap-northeast-2:723165663216:trail/cloud-logs-all"
+          }
+        }
+      },
+    ]
+  })
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  rule {
+    bucket_key_enabled = true
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# --- RDS 감사 로그 버킷 (2026-09-24 21:23 KST jaewoon 콘솔 생성) — Firehose RDS-Audit-PUT-S3(monitoring.tf) 전용 ---
+# 버킷 정책 없음 — Firehose 역할(iam.tf)의 권한으로 쓴다. 버전 관리 없음.
+# 수명주기(21:59 추가): rds/audit/ 30일 뒤 Glacier Instant Retrieval, 335일 뒤 삭제.
+# 객체 소유권 BucketOwnerEnforced·SSE-C 차단은 콘솔 기본값이라 코드에 두지 않는다.
+resource "aws_s3_bucket" "rds_audit" {
+  bucket = "rds-audit-bespin-723165663216-ap-northeast-2-an"
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "rds_audit" {
+  bucket = aws_s3_bucket.rds_audit.id
+
+  rule {
+    bucket_key_enabled = false
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "rds_audit" {
+  bucket = aws_s3_bucket.rds_audit.id
+
+  rule {
+    id     = "rds-audit-335days"
+    status = "Enabled"
+
+    filter {
+      prefix = "rds/audit/"
+    }
+
+    transition {
+      days          = 30
+      storage_class = "GLACIER_IR"
+    }
+
+    expiration {
+      days = 335
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "rds_audit" {
+  bucket = aws_s3_bucket.rds_audit.id
 
   block_public_acls       = true
   block_public_policy     = true
