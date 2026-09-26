@@ -329,7 +329,9 @@ resource "aws_autoscaling_group" "was" {
   }
 }
 
-# CPU 60% 목표 추적 (web 과 동일). 알람 TargetTracking-was-asg-AlarmHigh/Low 는 이 정책이 소유.
+# CPU 목표 추적. 9/26 s5-3300 실측(5분 최대 54.7%) 후 60 → 50. 알람 TargetTracking-was-asg-AlarmHigh/Low 는 이 정책이 소유.
+# 주의(9/26 결론): WAS 는 DB 응답 대기가 대부분이라 CPU 가 낮게 머문다 — 기준을 내려도 병목(DB CPU) 해소와는 무관하고,
+# 부하 중 증설 장면은 "늘려도 처리량 그대로(병목 DB 입증)" 자료로 기록할 것.
 resource "aws_autoscaling_policy" "was_cpu" {
   name                      = "Target Tracking Policy"
   autoscaling_group_name    = aws_autoscaling_group.was.name
@@ -337,7 +339,7 @@ resource "aws_autoscaling_policy" "was_cpu" {
   estimated_instance_warmup = 60
 
   target_tracking_configuration {
-    target_value     = 60
+    target_value     = 50
     disable_scale_in = false
 
     predefined_metric_specification {
