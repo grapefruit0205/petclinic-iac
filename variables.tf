@@ -113,7 +113,7 @@ variable "instance_profile_names" {
 variable "db_identifier" {
   description = "RDS instance identifier"
   type        = string
-  default     = "database-1"
+  default     = "database" # 2026-09-26 19:59 이름 변경 (옛 database-1)
 }
 
 variable "db_subnet_group_name" {

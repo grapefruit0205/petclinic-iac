@@ -1,6 +1,34 @@
 {
   "agent": {
+    "metrics_collection_interval": 60,
     "run_as_user": "root"
+  },
+  "metrics": {
+    "namespace": "PetClinic/WAS",
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}",
+      "AutoScalingGroupName": "${aws:AutoScalingGroupName}"
+    },
+    "metrics_collected": {
+      "disk": {
+        "resources": [
+          "/"
+        ],
+        "measurement": [
+          "used_percent"
+        ],
+        "ignore_file_system_types": [
+          "sysfs",
+          "devtmpfs",
+          "tmpfs"
+        ]
+      },
+      "mem": {
+        "measurement": [
+          "mem_used_percent"
+        ]
+      }
+    }
   },
   "logs": {
     "logs_collected": {
@@ -9,20 +37,17 @@
           {
             "file_path": "/opt/tomcat/logs/petclinic/application.log",
             "log_group_name": "/petclinic/prod/was/petclinic/application",
-            "log_stream_name": "{instance_id}",
-            "retention_in_days": 30
+            "log_stream_name": "{instance_id}"
           },
           {
             "file_path": "/opt/tomcat/logs/localhost_access_log.*.txt",
             "log_group_name": "/petclinic/prod/was/tomcat/access",
-            "log_stream_name": "{instance_id}",
-            "retention_in_days": 14
+            "log_stream_name": "{instance_id}"
           },
           {
             "file_path": "/opt/tomcat/logs/catalina.*.log",
             "log_group_name": "/petclinic/prod/was/tomcat/catalina",
-            "log_stream_name": "{instance_id}",
-            "retention_in_days": 30
+            "log_stream_name": "{instance_id}"
           }
         ]
       }

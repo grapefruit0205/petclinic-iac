@@ -1,8 +1,9 @@
 # 데이터 계층 — RDS MySQL(Multi-AZ).
 # RDS Proxy pet-proxy 는 아무도 안 써서(ClientConnections 0) 2026-09-22 08:55 KST 삭제 (CLI, kdt5).
 # 프록시가 쓰던 IAM 역할·정책·로그 그룹도 같은 날 09:00 KST 삭제 완료 — 코드에 흔적 없음.
-# 마스터 비밀번호는 RDS 관리형 시크릿(rds!db-…)이다. provider 는 import 시 manage_master_user_password 를
-# 읽지 않으므로 코드에 넣으면 plan 에 변경으로 잡힌다 — 그래서 비워 둔다. 시크릿 ARN 은 master_user_secret 로 참조.
+# 마스터 비밀번호: 처음엔 RDS 관리형 시크릿(rds!db-…)이었는데 2026-09-26 20:13 KST jaewoon 이 관리형을 끄고(그 시크릿은 RDS 가 20:14 즉시 삭제)
+# 직접 정한 비밀번호로 바꿨다(21:13 한 번 더 변경). 그 값은 jaewoon 이 21:19 만든 일반 시크릿 RDS-Secret-key(아래)에 있고,
+# WAS 역할이 그 시크릿을 읽는다(iam.tf). 비밀번호는 코드·state 에 두지 않는다 — password 를 비워 두면 provider 는 비교하지 않는다.
 
 resource "aws_db_subnet_group" "main" {
   name        = "petclinic-db-subnet-group"
@@ -59,8 +60,12 @@ resource "aws_db_option_group" "audit" {
   }
 }
 
+# 2026-09-26 jaewoon 콘솔(읽기 복제본 준비): 19:12 이름 database-1 → database-read-only · 최대 스토리지 1000 → 250 · Multi-AZ 끔,
+# 19:59 이름 database · Multi-AZ 다시 켬, 20:13 비밀번호 방식 변경(위), 20:33 복제본 db-readonly 생성(아래).
+# 이름이 바뀌면 엔드포인트도 바뀐다(database-1.c6vk… → database.c6vk…). 그날 21:30~01:47 WAS 가 ELB 헬스 체크에 28번 실패해 교체됐고
+# 01:47~03:49 는 WAS 0대 — semin 이 이미지 v6 · 시작 템플릿 v7 로 복구(compute.tf).
 resource "aws_db_instance" "main" {
-  identifier     = "database-1"
+  identifier     = "database"
   engine         = "mysql"
   engine_version = "8.0.44"
   instance_class = "db.t3.small"
@@ -70,7 +75,7 @@ resource "aws_db_instance" "main" {
   port     = 3306
 
   allocated_storage     = 200
-  max_allocated_storage = 1000
+  max_allocated_storage = 250 # 2026-09-26 19:12 jaewoon 1000 → 250 (자동 확장 상한)
   storage_type          = "gp3"
   iops                  = 3000
   storage_throughput    = 125
@@ -85,8 +90,8 @@ resource "aws_db_instance" "main" {
   option_group_name      = aws_db_option_group.audit.name
   ca_cert_identifier     = "rds-ca-rsa2048-g1"
 
-  # 자동 백업 0일 = RDS 자체 백업은 없다. 대신 2026-09-25 jaewoon 이 AWS Backup 으로 매일 백업(아래 aws_backup_plan.rds).
-  backup_retention_period = 0
+  # 자동 백업 7일 — 2026-09-26 18:38 KST jaewoon 콘솔에서 0 → 7 (시점 복구 가능). 매일 스냅샷은 AWS Backup 도 따로 만든다(아래 aws_backup_plan.rds).
+  backup_retention_period = 7
   backup_window           = "13:45-14:15"
   maintenance_window      = "mon:13:01-mon:13:31"
   copy_tags_to_snapshot   = false
@@ -106,8 +111,56 @@ resource "aws_db_instance" "main" {
   }
 }
 
+# 읽기 복제본 — 2026-09-26 20:33 KST jaewoon 콘솔 생성. database 에서 비동기 복제, 2a 한 곳(Multi-AZ 아님).
+# 엔드포인트 db-readonly.c6vk…. 엔진·사용자·DB 이름은 원본에서 물려받아 적지 않는다.
+# 원본과 다른 점: 향상된 모니터링 60초(rds-monitoring-role) · 마이너 버전 자동 업그레이드 켬 · 최대 스토리지 1000 · 자동 백업 0 · 삭제 보호 꺼짐.
+resource "aws_db_instance" "replica" {
+  identifier          = "db-readonly"
+  replicate_source_db = aws_db_instance.main.identifier
+  instance_class      = "db.t3.small"
+  availability_zone   = "ap-northeast-2a"
+
+  allocated_storage     = 200
+  max_allocated_storage = 1000
+  storage_type          = "gp3"
+  iops                  = 3000
+  storage_throughput    = 125
+  storage_encrypted     = true
+  kms_key_id            = "arn:aws:kms:ap-northeast-2:723165663216:key/d1e1bfc1-b343-4681-a1fe-d60c38e4863e"
+
+  # 서브넷 그룹은 원본(petclinic-db-subnet-group)을 물려받는다. 같은 리전 복제본에 적으면 provider 가 source 를 ARN 으로 요구해 적지 않는다.
+  multi_az               = false
+  vpc_security_group_ids = [aws_security_group.db.id]
+  publicly_accessible    = false
+  port                   = 3306
+  parameter_group_name   = aws_db_parameter_group.mysql_log.name
+  option_group_name      = aws_db_option_group.audit.name
+  ca_cert_identifier     = "rds-ca-rsa2048-g1"
+
+  backup_retention_period = 0
+  backup_window           = "13:45-14:15"
+  maintenance_window      = "mon:13:01-mon:13:31"
+  copy_tags_to_snapshot   = false
+  deletion_protection     = false
+
+  auto_minor_version_upgrade      = true
+  enabled_cloudwatch_logs_exports = ["error", "slowquery"]
+  monitoring_interval             = 60
+  monitoring_role_arn             = aws_iam_role.rds_monitoring.arn
+  performance_insights_enabled    = false
+
+  skip_final_snapshot = true
+}
+
+# DB 마스터 비밀번호 보관 — 2026-09-26 21:19 KST jaewoon 콘솔 생성. 일반 시크릿(자동 교체 없음, 기본 키 aws/secretsmanager).
+# 값(버전)은 코드·state 에 두지 않는다 — 시크릿 껍데기만 관리.
+resource "aws_secretsmanager_secret" "rds_app" {
+  name        = "RDS-Secret-key"
+  description = "RDS-Secret-key"
+}
+
 # --- AWS Backup (2026-09-25 16:00~16:06 KST jaewoon 콘솔) ---
-# RDS 자동 백업(backup_retention_period)은 0 이라, 매일 스냅샷을 AWS Backup 이 대신 만든다. 첫 백업 9/25 성공.
+# 매일 03:00 KST 스냅샷을 35일 보관. 첫 백업 9/25 성공. (9/26 부터는 RDS 자동 백업 7일도 켜져 있어 백업이 두 겹이다.)
 # 금고 암호화 키는 AWS 관리형 alias/aws/backup.
 resource "aws_backup_vault" "rds" {
   name        = "rds-backup-vault"
@@ -139,7 +192,7 @@ resource "aws_backup_plan" "rds" {
   }
 }
 
-# 대상: 계정의 모든 RDS DB 인스턴스 (지금은 database-1 하나).
+# 대상: 계정의 모든 RDS DB 인스턴스 — 지금은 database 와 복제본 db-readonly 둘 다 (9/27 04:05·04:54 둘 다 스냅샷됨).
 resource "aws_backup_selection" "rds" {
   name         = "rds-prod-assignment"
   plan_id      = aws_backup_plan.rds.id

@@ -9,7 +9,7 @@
       "width": 24,
       "height": 2,
       "properties": {
-        "markdown": "## PetClinic 부하 테스트 — 위에서 아래로 앞단 → web → WAS → DB\n① 초당 요청이 부하기 JMeter 의 `/s` 와 비슷하면 정상 · **S4**: ② 가 빨간 선(20,000)을 넘음 → ⑥ 알람 → ③ web 2→3대, ④ p95 가 그대로면 성공 · **S5**: ⑧ DB CPU 가 먼저 오른다 · 스톱: ④ p95 3초 2분 지속 · ⑧ DB CPU 90% 지속 · 에러 5%"
+        "markdown": "## PetClinic 부하 테스트 — 위에서 아래로 앞단 → web → WAS → DB\n① 초당 요청이 부하기 JMeter 의 `/s` 와 비슷하면 정상 · **S4**: ② 가 빨간 선(20,000)을 넘음 → ⑥ 알람 → ③ web 2→3대, ④ p95 가 그대로면 성공 · **S5**: ⑧ DB CPU 가 먼저 오른다(원본·복제본 나눠 보기) · ⑬ 복제 지연 · 스톱: ④ p95 3초 2분 지속 · ⑧ DB CPU 90% 지속 · 에러 5%"
       }
     },
     {
@@ -388,7 +388,7 @@
       "width": 8,
       "height": 6,
       "properties": {
-        "title": "⑧ DB CPU % · 연결 수",
+        "title": "⑧ DB CPU % · 연결 수 — 원본 database · 복제본 db-readonly",
         "region": "ap-northeast-2",
         "view": "timeSeries",
         "stacked": false,
@@ -398,21 +398,38 @@
             "AWS/RDS",
             "CPUUtilization",
             "DBInstanceIdentifier",
-            "database-1",
+            "database",
             {
               "stat": "Average",
-              "label": "DB CPU %"
+              "label": "원본 CPU %"
+            }
+          ],
+          [
+            "...",
+            "db-readonly",
+            {
+              "stat": "Average",
+              "label": "복제본 CPU %"
             }
           ],
           [
             ".",
             "DatabaseConnections",
             ".",
-            ".",
+            "database",
             {
               "stat": "Maximum",
               "yAxis": "right",
-              "label": "DB 연결 수"
+              "label": "원본 연결 수"
+            }
+          ],
+          [
+            "...",
+            "db-readonly",
+            {
+              "stat": "Maximum",
+              "yAxis": "right",
+              "label": "복제본 연결 수"
             }
           ]
         ],
@@ -449,7 +466,7 @@
       "width": 8,
       "height": 6,
       "properties": {
-        "title": "⑨ DB 지연 (초) · 대기열",
+        "title": "⑨ DB 지연 (초) · 대기열 — 원본 · 복제본 읽기",
         "region": "ap-northeast-2",
         "view": "timeSeries",
         "stacked": false,
@@ -459,10 +476,10 @@
             "AWS/RDS",
             "WriteLatency",
             "DBInstanceIdentifier",
-            "database-1",
+            "database",
             {
               "stat": "Average",
-              "label": "쓰기 지연 (초)"
+              "label": "원본 쓰기 지연 (초)"
             }
           ],
           [
@@ -472,18 +489,26 @@
             ".",
             {
               "stat": "Average",
-              "label": "읽기 지연 (초)"
+              "label": "원본 읽기 지연 (초)"
+            }
+          ],
+          [
+            "...",
+            "db-readonly",
+            {
+              "stat": "Average",
+              "label": "복제본 읽기 지연 (초)"
             }
           ],
           [
             ".",
             "DiskQueueDepth",
             ".",
-            ".",
+            "database",
             {
               "stat": "Average",
               "yAxis": "right",
-              "label": "디스크 대기열"
+              "label": "원본 디스크 대기열"
             }
           ]
         ],
@@ -552,7 +577,7 @@
       "width": 12,
       "height": 6,
       "properties": {
-        "title": "⑪ DB 쓰기 IOPS · CPU 크레딧",
+        "title": "⑪ DB 쓰기 IOPS · CPU 크레딧 — 원본 · 복제본",
         "region": "ap-northeast-2",
         "view": "timeSeries",
         "stacked": false,
@@ -562,21 +587,38 @@
             "AWS/RDS",
             "WriteIOPS",
             "DBInstanceIdentifier",
-            "database-1",
+            "database",
             {
               "stat": "Average",
-              "label": "쓰기 IOPS"
+              "label": "원본 쓰기 IOPS"
+            }
+          ],
+          [
+            "...",
+            "db-readonly",
+            {
+              "stat": "Average",
+              "label": "복제본 쓰기 IOPS"
             }
           ],
           [
             ".",
             "CPUCreditBalance",
             ".",
-            ".",
+            "database",
             {
               "stat": "Minimum",
               "yAxis": "right",
-              "label": "CPU 크레딧 잔량"
+              "label": "원본 CPU 크레딧 잔량"
+            }
+          ],
+          [
+            "...",
+            "db-readonly",
+            {
+              "stat": "Minimum",
+              "yAxis": "right",
+              "label": "복제본 CPU 크레딧 잔량"
             }
           ]
         ],
@@ -645,6 +687,82 @@
           "right": {
             "min": 0,
             "max": 6
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 26,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "⑬ 복제 지연 (초) — 쓰기 직후 읽기가 복제본으로 가면 이만큼 옛 데이터를 본다",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "ap-northeast-2",
+        "period": 60,
+        "metrics": [
+          [
+            "AWS/RDS",
+            "ReplicaLag",
+            "DBInstanceIdentifier",
+            "db-readonly",
+            {
+              "stat": "Maximum",
+              "label": "복제 지연 (초, 1분 최대)"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0
+          }
+        },
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "1초",
+              "value": 1,
+              "color": "#ff7f0e"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 32,
+      "width": 24,
+      "height": 6,
+      "properties": {
+        "title": "⑭ 메모리 사용률 % — web · WAS 1대씩 (CloudWatch Agent, 1분)",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "ap-northeast-2",
+        "period": 60,
+        "metrics": [
+          [
+            {
+              "expression": "REMOVE_EMPTY(SEARCH('{PetClinic/WAS,AutoScalingGroupName,InstanceId} MetricName=\"mem_used_percent\"', 'Average', 60))",
+              "id": "was",
+              "label": "WAS ${PROP('Dim.InstanceId')}"
+            }
+          ],
+          [
+            {
+              "expression": "REMOVE_EMPTY(SEARCH('{PetClinic/WEB,AutoScalingGroupName,InstanceId} MetricName=\"mem_used_percent\"', 'Average', 60))",
+              "id": "web",
+              "label": "web ${PROP('Dim.InstanceId')}"
+            }
+          ]
+        ],
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "max": 100
           }
         }
       }

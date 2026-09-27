@@ -159,14 +159,16 @@ resource "aws_kinesis_firehose_delivery_stream" "rds_audit" {
   }
 }
 
-# 대시보드 — 2026-09-24 18:38 KST 마지막 저장(콘솔, 만든 사람은 CloudTrail 조회로 안 나옴). CloudFront 지표 위젯 1개.
-# 부하 테스트 화면 공유용 대시보드 11칸 — 2026-09-26 16:23~16:41 KST kdt5 가 CLI put-dashboard 로 생성
+# 부하 테스트 화면 공유용 대시보드 — 2026-09-26 16:23~16:41 KST kdt5 가 CLI put-dashboard 로 생성
 # (원본 loadtest/cloudwatch-dashboard.json 과 같음). 칸을 바꾸면 이 JSON 을 고치고 plan.
+# 2026-09-27: DB 이름 변경(database-1 → database)으로 ⑧⑨⑪ 이 비어 있던 것을 고치고 복제본 db-readonly 선 추가,
+#   ⑬ 복제 지연 · ⑭ web·WAS 메모리(CloudWatch Agent) 칸 추가 → 14칸.
 resource "aws_cloudwatch_dashboard" "loadtest" {
   dashboard_name = "petclinic-loadtest"
   dashboard_body = file("${path.module}/cloudwatch/dashboard-petclinic-loadtest.json")
 }
 
+# 대시보드 — 2026-09-24 18:38 KST 마지막 저장(콘솔, 만든 사람은 CloudTrail 조회로 안 나옴). CloudFront 지표 위젯 1개.
 resource "aws_cloudwatch_dashboard" "traffic" {
   dashboard_name = "PetClinic-Traffic-Dashboard"
 

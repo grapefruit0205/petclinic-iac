@@ -138,7 +138,7 @@ resource "aws_iam_role_policy_attachment" "chatbot_q" {
 
 
 # WAS 역할 (ASG WAS · WAS-test-a · was-gg2). 설명의 "rds full acess" 는 옛 이름 그대로 — 그 정책은 2026-09-23 떼어냈다.
-# 붙은 것: 시크릿 읽기(인라인) · SSM Core · CloudWatch Agent. 과잉 권한이던 AmazonRDSFullAccess 는 없음.
+# 붙은 것: 시크릿 읽기(인라인) · WAR 받기(인라인, 9/26) · SSM Core · CloudWatch Agent. 과잉 권한이던 AmazonRDSFullAccess 는 없음.
 resource "aws_iam_role" "was" {
   name                 = "was-test-iam"
   path                 = "/"
@@ -176,6 +176,7 @@ resource "aws_iam_instance_profile" "was" {
 }
 
 # 2026-09-21 15:02 KST semin: WAS 가 부팅 때 RDS 관리형 시크릿에서 DB 비밀번호를 읽도록 (부하 시나리오 v2 §7 의 user data 흐름).
+# 2026-09-26 21:24 KST jaewoon: 관리형 시크릿이 없어져서(database.tf) 대상을 새 시크릿 RDS-Secret-key 로 바꿈.
 resource "aws_iam_role_policy" "was_read_rds_secret" {
   name = "PetclinicReadRdsSecret"
   role = aws_iam_role.was.name
@@ -186,12 +187,27 @@ resource "aws_iam_role_policy" "was_read_rds_secret" {
       Sid      = "ReadPetclinicRdsSecret"
       Effect   = "Allow"
       Action   = "secretsmanager:GetSecretValue"
-      Resource = aws_db_instance.main.master_user_secret[0].secret_arn
+      Resource = aws_secretsmanager_secret.rds_app.arn
     }]
   })
 }
 
-# RDS 향상된 모니터링용 역할 — 만들어져 있지만 database-1 은 monitoring_interval = 0 이라 미사용.
+# 2026-09-26 23:09 KST jaewoon: WAS 가 WAR 파일을 S3 war-was-cd(storage.tf)에서 받도록 — 그 파일 하나만 읽기.
+resource "aws_iam_role_policy" "was_get_war" {
+  name = "petclinic.war"
+  role = aws_iam_role.was.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:GetObject"]
+      Resource = "${aws_s3_bucket.war.arn}/petclinic.war"
+    }]
+  })
+}
+
+# RDS 향상된 모니터링용 역할 — 복제본 db-readonly 가 쓴다(60초, 2026-09-26~). 원본 database 는 monitoring_interval = 0 이라 안 씀.
 resource "aws_iam_role" "rds_monitoring" {
   name                 = "rds-monitoring-role"
   path                 = "/"

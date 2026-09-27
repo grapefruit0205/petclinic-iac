@@ -50,7 +50,7 @@ state 가 있으므로 이제 `terraform plan` 은 **코드(2026-09-19 스냅샷
 | 진입 | `entry.tf` | ALB 2, 타깃 그룹 2, 리스너 3 (443 ACM · 80 · internal 80), 443 `superheader` 리스너 규칙, ALB 인증서 |
 | 컴퓨트 | `compute.tf` | 골든 AMI `web-appache` · `was-goldenImage-test` · `was-goldenImage-test-v2`, 시작 템플릿 `web` · `was-lt`(latest v2, default 1), ASG `web-test`(CPU 60% 목표추적 + 요청수 단계 정책) · `was-asg`(CPU 60%, `$Latest`), 단독 인스턴스 5(골든 이미지 v2 원본 `was-gg2` 포함; v1 원본 `was-goldenImage` 는 9/22 종료), WAS 데이터 볼륨 + 연결 |
 | IAM | `iam.tf` | 역할 4 (`mc-ec2-role` · `was-test-iam` · `bastion-role` · `rds-monitoring-role`), 프로파일 3, 정책 연결 5, 인라인 정책 1 (`was-test-iam` 의 `PetclinicReadRdsSecret`) |
-| 데이터 | `database.tf` | RDS `database-1`, 파라미터 그룹, 서브넷 그룹 (RDS Proxy 는 2026-09-22 제거 결정 — 코드·state 에서 뺌) |
+| 데이터 | `database.tf` | RDS `database`(9/26 까지 `database-1`) + 읽기 복제본 `db-readonly`, 시크릿 `RDS-Secret-key`(껍데기만), 파라미터 그룹, 서브넷 그룹 (RDS Proxy 는 2026-09-22 제거 결정 — 코드·state 에서 뺌) |
 | 스토리지·로그 | `storage.tf` | S3 `mc-static-image` + 정책 · 퍼블릭 차단 · 암호화 · 버전 관리, 중앙 로그 버킷 `mc-logs-petclinic`(CloudFront `petclinic/prod/edge/` + ALB `petclinic/prod/entry/`) + 정책 · 퍼블릭 차단 · 수명주기(entry 90일), WAF 로그 버킷 `aws-waf-logs-petclinic-block`(us-east-1) + 정책, 로그 그룹 8 (web 4 · 베스천 2 · RDS 2) |
 | 모니터링 | `monitoring.tf` | SNS 토픽 `mc-alerts` → Slack `#petclinic-alerts` (Amazon Q Developer in chat applications; 이메일 구독은 9/23 해제), 알람 `alarm-web-reqcount-high-20000` (Public ALB 타깃당 요청수 → web 단계 정책 + Slack) |
 | 엣지 | `edge.tf` | CloudFront 분포 + OAC + Function(`petclinic-home-to-landing`, 코드는 `cloudfront/`), WAF 웹 ACL + 로깅 설정(S3, BLOCK 만), CloudFront 표준 로그 v2 전송 3종(소스·목적지·전송, us-east-1), CloudFront 인증서, Route53 존 + 레코드 3 (A · AAAA · ACM 검증) |
@@ -63,7 +63,8 @@ state 가 있으므로 이제 `terraform plan` 은 **코드(2026-09-19 스냅샷
 |---|---|
 | 키페어 `test-key` | 퍼블릭 키를 API 로 못 읽어 import 불가. 이름만 문자열로 참조 |
 | Public ALB 의 EIP 2개 (`52.78.70.34` · `3.38.76.227`) | ELB 가 관리 |
-| RDS 관리형 시크릿 `rds!db-…` | RDS 가 소유. `aws_db_instance.main.master_user_secret` 로 참조 |
+| Parameter Store `/petclinic/cwagent/was` (WAS CloudWatch Agent 설정) | 팀이 Parameter Store 에서 직접 관리. 레포 `cloudwatch/cwagent-was.json` 은 기준본 — 바꾸면 이 파일을 고치고 `put-parameter` 로 올린다 (2026-09-27 메모리·디스크 지표 추가) |
+| 시크릿 `RDS-Secret-key` 의 값(버전) | 비밀번호라 코드·state 에 두지 않는다. 시크릿 자체는 `aws_secretsmanager_secret.rds_app` |
 | 알람 `TargetTracking-web-test-AlarmHigh/Low` | 목표추적 정책이 소유 |
 | `default` SG · 기본 NACL | VPC 기본값 (SG 는 `data.tf` 에서 조회만) |
 | 고아 OAC `E32W5M7BHL5ZBD`(`oac-mylab-junseok…`), 없는 분포 `E2KEFN428TOT1G` 용 CloudFront 로그 전송 소스, EFS 자동 백업 플랜(2021), 서비스 연결 역할, `Bespin-Academy-Support_DO_NOT_DELETE` | 이 스택과 무관하거나 정리 대상 |
@@ -87,7 +88,8 @@ Route53 24petclinic.mission-critical.site (A/AAAA alias)
               → Targetgroup-web :80 = ASG web-test 2대(t3.small) + WEB-test-a
                   httpd 리버스프록시 /petclinic/ → Internal ALB :80
                       → tg-internal-alb :8080 = ASG was-asg (was-lt v1 · t3.medium ×2~4, 2026-09-21) — 옛 WAS-test-a 는 등록 해제(아직 running)
-                          → RDS database-1 직결 (MySQL 8.0.44, db.t3.small, Multi-AZ, 200GB)
+                          → RDS database 직결 (MySQL 8.0.44, db.t3.small, Multi-AZ, 200GB) — 9/26 까지 이름 database-1
+                            + 읽기 복제본 db-readonly (9/26~, 2a, WAS 의 읽기 분리용으로 보임 — semin 확인 필요)
                             ※ RDS Proxy pet-proxy 는 아무도 안 써서(ClientConnections 0) 2026-09-22 삭제
 ```
 
@@ -114,11 +116,13 @@ Route53 24petclinic.mission-critical.site (A/AAAA alias)
     - Tomcat 기본 앱(`ROOT`·`docs`·`examples`·`manager`·`host-manager`)이 그대로 배포돼 있다. `mariadb105` 클라이언트 설치됨.
     - 재배포 = 새 WAR 를 `/tmp` 로 scp → `tomcat` 정지 → `webapps/petclinic{,.war}` 삭제 → 복사·chown → 시작. 1대뿐이라 그동안 502.
   - SSM 관리 노드는 `mc-ec2-role` 이 붙은 인스턴스뿐 (ASG 2 + 시작하면 `web-ami` · `WEB-test-a`).
-- **보안 그룹** — `web-instance-sg` 는 `0.0.0.0/0` 규칙 없음. ⚠️ `SG-bastion` 은 **22·80·443** 을, `was-instance-sg` 는 **80·443·8080** 을 `0.0.0.0/0` 에 개방 (WAS 는 프라이빗 서브넷이라 VPC 안에서만 닿는다).
-- **IAM** — `mc-ec2-role` = `CloudWatchAgentServerPolicy` + `AmazonSSMManagedInstanceCore`. ⚠️ `was-test-iam` = `AmazonRDSFullAccess` (과잉). `rds-monitoring-role` 은 만들어져 있지만 미사용.
-- **데이터** — RDS `mysql 8.0.44` · `db.t3.small` · Multi-AZ · gp3 200GB(최대 1000) · 암호화 · 파라미터 그룹 `petclinic-mysql-log`(슬로우 쿼리 2초). ⚠️ **자동 백업 0일, 수동 스냅샷 0개.** 향상된 모니터링·PI 꺼짐.
+- **보안 그룹** — `0.0.0.0/0` 인바운드는 `SG-bastion` 의 **22** 하나뿐 (2026-09-26 확인). 베스천 80·443 은 9/26 18:40, `was-instance-sg` 의 80·443·8080 은 9/22 yena 가 회수.
+- **IAM** — `mc-ec2-role` = `CloudWatchAgentServerPolicy` + `AmazonSSMManagedInstanceCore`. `was-test-iam` = 같은 두 정책 + 인라인 2개(시크릿 `RDS-Secret-key` 읽기 · `war-was-cd/petclinic.war` 읽기). `rds-monitoring-role` 은 복제본 `db-readonly` 가 쓴다.
+- **데이터** — RDS `database`(2026-09-26 19:59 jaewoon 이름 변경, 옛 `database-1`) · `mysql 8.0.44` · `db.t3.small` · Multi-AZ · gp3 200GB(최대 250, 9/26 1000 → 250) · 암호화 · 파라미터 그룹 `petclinic-mysql-log`(슬로우 쿼리 2초). 백업: RDS 자동 백업 7일(2026-09-26 18:38 jaewoon, 시점 복구 가능) + AWS Backup 매일 03:00 KST·35일(9/25~) + 수동 스냅샷 `rds-pet-snapshot`(9/24). 삭제 보호 켜짐. 향상된 모니터링·PI 꺼짐.
   - RDS Proxy `pet-proxy`: WAS 가 프록시를 거치지 않고 RDS 에 직결(`ClientConnections` 0)해 **2026-09-22 08:55 KST 삭제** (역할 `rds-proxy-role-…`·정책·로그 그룹 `/aws/rds/proxy/pet-proxy` 도 09:00 같이 삭제). 코드·state 에 흔적 없음.
-  - ⚠️ WAR 에 박힌 `admin` 비밀번호는 RDS 관리형 시크릿이라 **자동 교체가 켜져 있다** — 교체되는 순간 앱 DB 접속이 끊긴다. 전용 앱 사용자 + 교체 없는 시크릿으로 바꿔야 한다.
+  - 비밀번호: 2026-09-26 20:13 jaewoon 이 RDS 관리형 시크릿(자동 교체)을 끄고 일반 시크릿 `RDS-Secret-key`(자동 교체 없음)로 옮겼다 → 관리형 시크릿 교체로 앱 접속이 끊길 위험은 없어졌다. 앱은 여전히 `admin`(마스터) 사용.
+  - 읽기 복제본 `db-readonly`(2026-09-26 20:33 jaewoon): db.t3.small · 2a 단일 · 향상된 모니터링 60초 · 자동 백업 0 · 삭제 보호 꺼짐 · 마이너 자동 업그레이드 켬(원본은 끔). AWS Backup 대상(`db:*`)에 같이 들어간다.
+  - 9/26 밤 이름·비밀번호 변경 뒤 WAS 가 ELB 헬스 체크에 28번 실패(21:30~01:47 KST), 01:47~03:49 WAS 0대 → semin 이 이미지 v6·시작 템플릿 v7 로 복구.
 - **스토리지** — 버킷은 `mc-static-image` 하나뿐 → ALB·CloudFront 로그 버킷 없음. ALB 2대 모두 액세스 로깅 꺼짐.
   - 버킷 구조 (2026-09-19 21:10 KST): 루트에 랜딩(`index.html` · `css/mc-site.css` · `images/hero-poster.jpg` · `images/hero/hero.mp4`), `petclinic/resources/{css,fonts,images,js}` 에 WAR 페이지용 정적 파일 22개. 원본은 `middleproject` 의 `docs/site-static/` 과 `src/main/webapp/resources/`(`less/` 제외).
   - 정적 파일을 바꾸면 S3 업로드 + CloudFront 무효화(`/*` 또는 바뀐 경로). 무효화 안 하면 하루(CachingOptimized 기본 TTL) 동안 옛것이 보인다.

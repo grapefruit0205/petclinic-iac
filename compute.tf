@@ -259,6 +259,30 @@ resource "aws_ami" "was_golden_v5" {
   }
 }
 
+# 골든 이미지 v6 (2026-09-27 03:44 KST, semin): was-gg2 에서 CreateImage(재부팅). 9/26 밤 DB 이름·비밀번호 방식이 바뀐 뒤
+# WAS 가 뜨지 못하던 것을 was-gg2 에서 고쳐 굳힌 이미지(고친 내용은 semin 확인 필요). 시작 템플릿 v7 이 쓴다.
+resource "aws_ami" "was_golden_v6" {
+  name                = "was-goldenImage-v6"
+  architecture        = "x86_64"
+  virtualization_type = "hvm"
+  root_device_name    = "/dev/xvda"
+  ena_support         = true
+  sriov_net_support   = "simple"
+  boot_mode           = "uefi-preferred"
+  imds_support        = "v2.0"
+
+  ebs_block_device {
+    device_name           = "/dev/xvda"
+    snapshot_id           = "snap-074fad84289cfaccb"
+    volume_size           = 20
+    volume_type           = "gp3"
+    iops                  = 3000
+    throughput            = 125
+    delete_on_termination = true
+    encrypted             = false
+  }
+}
+
 resource "aws_ami" "was_golden_v2" {
   name                = "was-goldenImage-test-v2"
   architecture        = "x86_64"
@@ -281,7 +305,7 @@ resource "aws_ami" "was_golden_v2" {
   }
 }
 
-# 시작 템플릿 was-lt. 실물은 latest=6 · default=5, ASG 는 $Latest(= v6). 이 블록은 latest(v6) 의 내용 — provider 는 최신 버전을 읽는다.
+# 시작 템플릿 was-lt. 실물은 latest=7 · default=5, ASG 는 $Latest(= v7). 이 블록은 latest(v7) 의 내용 — provider 는 최신 버전을 읽는다.
 # v1 (17:20 KST): AMI was-goldenImage-test, 루트도 KMS 암호화, 설명 "was 웹서버 시작 템플릿".
 # v2 (18:42 KST, semin): AMI was-goldenImage-test-v2 로 교체, 루트 비암호화, /dev/sdf 처리량 미지정, 설명 없음. user data 는 v1 과 동일.
 # v3·v4 (2026-09-22 19:15·19:25 KST, semin): AMI was-goldenImage-v4(에이전트 설치됨) + user data 끝에 CloudWatch Agent 기동
@@ -290,12 +314,14 @@ resource "aws_ami" "was_golden_v2" {
 # v5 (2026-09-24 14:56 KST, semin): v4 + 세부 모니터링(1분 CPU) 켬 — 부하 테스트 S5 에서 5분 지표로는 2분 단계를 못 나눠서. 기본 버전 5.
 # v6 (2026-09-24 15:25 KST, semin): v5 + AMI was-goldenImage-v5(풀 20). 기본 버전은 5 그대로 두고 ASG 가 $Latest 라 새 WAS 는 v6.
 #   15:27~15:31 WAS 2대 교체 → 10.0.21.37 · 10.0.20.190. user data 는 v4~v6 모두 같다.
+# v7 (2026-09-27 03:49 KST, semin): v6 + AMI was-goldenImage-v6. user data 는 그대로. 기본 버전은 5 그대로.
+#   01:46 ASG 를 0대로 내렸다가 03:49 2대로 되돌림 → i-04be34630a6d5a368 · i-0648caed79a4a49e7 (v7).
 # t3.medium, 프로파일 was-test-iam (시크릿 읽기 · SSM Core · CloudWatch Agent — iam.tf).
 resource "aws_launch_template" "was" {
   name            = "was-lt"
   default_version = 5
 
-  image_id      = aws_ami.was_golden_v5.id
+  image_id      = aws_ami.was_golden_v6.id
   instance_type = "t3.medium"
   key_name      = "test-key"
   user_data     = base64encode(file("${path.module}/userdata/was-lt.sh"))

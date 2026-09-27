@@ -2,7 +2,7 @@
 # 규칙 묶음(블록) 단위는 실물의 IpPermissions 그룹과 1:1 이어야 plan 이 0 이다.
 # `default` SG 는 VPC 기본이라 관리 대상에서 뺐다 (data.tf 에서 조회만).
 
-# 베스천. ⚠️ 22 뿐 아니라 80·443 도 0.0.0.0/0 에 열려 있다.
+# 베스천. 22 만 0.0.0.0/0 에 열려 있다 — 80·443 규칙은 2026-09-26 18:40 KST yena 가 콘솔에서 삭제.
 resource "aws_security_group" "bastion" {
   name        = "SG-bastion"
   description = "SSH allow"
@@ -11,18 +11,6 @@ resource "aws_security_group" "bastion" {
   ingress {
     from_port   = 22
     to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 80
-    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }

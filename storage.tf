@@ -105,6 +105,7 @@ resource "aws_cloudwatch_log_group" "bastion_ssh_secure" {
 
 # RDS error·slowquery — 2026-09-25 00:58·01:01 KST jaewoon 이 보존 30일로 바꿈 (그 전엔 0 = 만료 안 됨).
 # (/aws/rds/proxy/pet-proxy 는 프록시와 함께 2026-09-22 삭제)
+# database-1 로그 그룹 3개는 2026-09-26 19:12 DB 이름이 바뀐 뒤로 새 로그가 안 들어온다. 30일 보존이라 로그는 비워지지만 그룹은 남는다.
 resource "aws_cloudwatch_log_group" "rds_error" {
   name              = "/aws/rds/instance/database-1/error"
   retention_in_days = 30
@@ -119,6 +120,20 @@ resource "aws_cloudwatch_log_group" "rds_slowquery" {
 resource "aws_cloudwatch_log_group" "rds_audit" {
   name              = "/aws/rds/instance/database-1/audit"
   retention_in_days = 30
+}
+
+# 이름 바뀐 뒤 RDS 가 자동 생성한 error 로그 그룹 2개 — 2026-09-26 20:39(database)·20:41(db-readonly) KST. 보존 설정 없음(무기한).
+# slowquery 그룹은 느린 쿼리가 처음 나올 때 RDS 가 만든다 — 아직 없다.
+resource "aws_cloudwatch_log_group" "rds_error_database" {
+  name              = "/aws/rds/instance/database/error"
+  retention_in_days = 0
+  log_group_class   = "STANDARD"
+}
+
+resource "aws_cloudwatch_log_group" "rds_error_replica" {
+  name              = "/aws/rds/instance/db-readonly/error"
+  retention_in_days = 0
+  log_group_class   = "STANDARD"
 }
 
 # 감사 로그 → Firehose RDS-Audit-PUT-S3 → 전용 버킷. 2026-09-24 23:44 KST jaewoon 콘솔 생성 (역할 iam.tf logs_to_firehose).
@@ -448,6 +463,33 @@ resource "aws_s3_bucket_lifecycle_configuration" "rds_audit" {
 
 resource "aws_s3_bucket_public_access_block" "rds_audit" {
   bucket = aws_s3_bucket.rds_audit.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# --- WAR 배포 버킷 (2026-09-26 23:04 KST jaewoon 콘솔 생성) — petclinic.war(40.8 MB, 23:06 올림) 하나 ---
+# WAS 역할의 인라인 정책(iam.tf was_get_war)으로 그 파일만 읽는다. 버킷 정책·버전 관리 없음.
+# 객체 소유권 BucketOwnerEnforced·SSE-C 차단은 콘솔 기본값이라 코드에 두지 않는다(rds_audit 과 같음).
+resource "aws_s3_bucket" "war" {
+  bucket = "war-was-cd"
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "war" {
+  bucket = aws_s3_bucket.war.id
+
+  rule {
+    bucket_key_enabled = false
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "war" {
+  bucket = aws_s3_bucket.war.id
 
   block_public_acls       = true
   block_public_policy     = true

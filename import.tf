@@ -692,3 +692,40 @@ import {
   to = aws_cloudwatch_dashboard.loadtest
   id = "petclinic-loadtest"
 }
+# 2026-09-26 밤 ~ 09-27 새벽 콘솔 변경 (jaewoon: DB 이름·복제본·시크릿·WAR 버킷 / semin: WAS 이미지 v6)
+import {
+  to = aws_db_instance.replica
+  id = "db-readonly"
+}
+import {
+  to = aws_secretsmanager_secret.rds_app
+  id = "arn:aws:secretsmanager:ap-northeast-2:723165663216:secret:RDS-Secret-key-SwRTa1"
+}
+import {
+  to = aws_iam_role_policy.was_get_war
+  id = "was-test-iam:petclinic.war"
+}
+import {
+  to = aws_s3_bucket.war
+  id = "war-was-cd"
+}
+import {
+  to = aws_s3_bucket_server_side_encryption_configuration.war
+  id = "war-was-cd"
+}
+import {
+  to = aws_s3_bucket_public_access_block.war
+  id = "war-was-cd"
+}
+import {
+  to = aws_cloudwatch_log_group.rds_error_database
+  id = "/aws/rds/instance/database/error"
+}
+import {
+  to = aws_cloudwatch_log_group.rds_error_replica
+  id = "/aws/rds/instance/db-readonly/error"
+}
+import {
+  to = aws_ami.was_golden_v6
+  id = "ami-0eac111a62f8b8c94"
+}
