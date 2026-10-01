@@ -23,30 +23,75 @@ resource "aws_chatbot_slack_channel_configuration" "alerts" {
   user_authorization_required = false
 }
 
-# Public ALB → Targetgroup-web 의 타깃당 요청수(RequestCountPerTarget) 5분 합계가 20000 을 넘으면
-# web 단계 정책(compute.tf web_reqcount) 실행 + Slack 알림(SNS mc-alerts).
-# 통계 Sum (2026-09-23 15:0x kdt5, Average → Sum) — RequestCountPerTarget 은 합계 지표라 Average 면 1분 샘플 평균이 돼 web 2대 기준 667 RPS 가
-# 5분 가야 울렸다. Sum 이면 "타깃당 5분 합계 > 20,000" = 2대 기준 총 134 RPS (부하 테스트에서 web 확장을 검증하려면 필요).
-# 2026-09-24 01:23 kdt5 가 S5 준비 중 콘솔에서 삭제 → 9/24 이 코드 그대로 다시 만듦 (terraform apply -target).
-resource "aws_cloudwatch_metric_alarm" "web_reqcount_high" {
-  alarm_name          = "alarm-web-reqcount-high-20000"
-  alarm_description   = "WEB ALB RequestCountPerTarget exceeds 20000 for 5 minutes.\nScale out WEB ASG when traffic increases."
-  namespace           = "AWS/ApplicationELB"
-  metric_name         = "RequestCountPerTarget"
-  statistic           = "Sum"
-  period              = 300
+# (2026-09-30) alarm-web-reqcount-high-20000(타깃당 요청 5분 합계 20,000 → Slack) 삭제 — web 증설은 스레드 기준이고,
+#   2대 기준 총 134 RPS 면 울려 부하 테스트마다 첫 알림이 요청 수 알람이었다. 요청 몰림은 대시보드 ② 로 본다.
+
+# web 스레드 최대 개수(ApacheBusyThreadsMax, 통계 Maximum = 가장 바쁜 web 1대, 1,024개 중) — compute.tf 의 web_threads_out · web_threads_in 이 쓴다.
+# 스레드는 몇 초씩 몰렸다 빠져서(9/28 19:09 S5: 437 → 288 → 180 → 865 → 116 → 1,007) 1분 평균 % 로는 뭉개진다 → 최대 개수로 본다.
+# 늘리기: 1분이라도 512개(50%) 이상 → +1 · 820개 이상 → +2. 값이 안 오면(지표 스크립트가 멈추면) 늘리지 않는다 — notBreaching.
+resource "aws_cloudwatch_metric_alarm" "web_threads_max_high" {
+  alarm_name          = "alarm-web-threads-max-high-512"
+  alarm_description   = "WEB busiest instance Apache busy threads >= 512 (50% of 1024) in a minute. Scales out web-test (step)."
+  namespace           = "PetClinic/WEB"
+  metric_name         = "ApacheBusyThreadsMax"
+  statistic           = "Maximum"
+  period              = 60
   evaluation_periods  = 1
   datapoints_to_alarm = 1
-  threshold           = 20000
-  comparison_operator = "GreaterThanThreshold"
+  threshold           = 512
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.web.name
+  }
+
+  alarm_actions = [aws_autoscaling_policy.web_threads_out.arn]
+}
+
+# 줄이기: 15분 내내 128개(12.5%) 미만 → -1(최소 2대). 부하 중엔 튀는 값이 128 을 넘어 끼어들지 않는다. 값이 안 오면 줄이지 않는다 — notBreaching.
+resource "aws_cloudwatch_metric_alarm" "web_threads_max_low" {
+  alarm_name          = "alarm-web-threads-max-low-128"
+  alarm_description   = "WEB busiest instance Apache busy threads < 128 (12.5% of 1024) for 15 minutes. Scales in web-test (step, min 2)."
+  namespace           = "PetClinic/WEB"
+  metric_name         = "ApacheBusyThreadsMax"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 15
+  datapoints_to_alarm = 15
+  threshold           = 128
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.web.name
+  }
+
+  alarm_actions = [aws_autoscaling_policy.web_threads_in.arn]
+}
+
+# Slack: 가장 바쁜 web 의 스레드 820개(80%) 이상이 3분 중 2분 → 다 차면 ELB 502(9/24 매분 00초 502 · 9/28 19:21 S5 와 같은 원인).
+# 늘리기가 이미 돌고 있을 때 "그래도 차고 있다" 는 신호. 값이 안 오면 울리지 않는다 — missing.
+# (2026-09-28 19:0x 처음 만들 때는 평균 %(ApacheBusyThreadsPct) 80% 3분 연속 — 19:09 S5 에서 다 찼을 때도 부하가 먼저 끝나 안 울렸다)
+resource "aws_cloudwatch_metric_alarm" "web_threads_high" {
+  alarm_name          = "alarm-web-apache-threads-80"
+  alarm_description   = "[web] 가장 바쁜 web 1대의 Apache 작업 스레드가 820개(1,024개의 80%) 이상인 분이 3분 중 2분이면 울림 — 다 차면 ELB 502. 내려가면 OK 알림."
+  namespace           = "PetClinic/WEB"
+  metric_name         = "ApacheBusyThreadsMax"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
+  threshold           = 820
+  comparison_operator = "GreaterThanOrEqualToThreshold"
   treat_missing_data  = "missing"
 
   dimensions = {
-    LoadBalancer = aws_lb.public.arn_suffix
-    TargetGroup  = aws_lb_target_group.web.arn_suffix
+    AutoScalingGroupName = aws_autoscaling_group.web.name
   }
 
-  alarm_actions = [aws_autoscaling_policy.web_reqcount.arn, aws_sns_topic.alerts.arn]
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
 }
 
 # --- us-east-1 알람 2개 (2026-09-24 yena 콘솔 생성) — CloudFront·WAF 지표는 us-east-1 에만 있어 알람도 거기 ---
@@ -163,14 +208,19 @@ resource "aws_kinesis_firehose_delivery_stream" "rds_audit" {
 # (원본 loadtest/cloudwatch-dashboard.json 과 같음). 칸을 바꾸면 이 JSON 을 고치고 plan.
 # 2026-09-27: DB 이름 변경(database-1 → database)으로 ⑧⑨⑪ 이 비어 있던 것을 고치고 복제본 db-readonly 선 추가,
 #   ⑬ 복제 지연 · ⑭ web·WAS 메모리(CloudWatch Agent) 칸 추가 → 14칸.
+# 2026-09-28: ⑦ WAS CPU → "WAS 대수 · CPU"(원하는·서비스 중 대수 + 내부 ALB 정상 대수 — 그룹 지표를 켜기 전 기간도 정상 대수로 보인다).
+#   ⑥ 알람 ARN 교체 — 목표 추적 알람은 정책을 고칠 때마다 새 ID 로 다시 만들어져 옛 ARN 2개가 비어 있었다. 늘리는 쪽(AlarmHigh)만 둔다.
+# 2026-09-30: 맨 위에 "계층별 통과량" 14칸 추가(합계 숫자 줄 · 초당 결과별 쌓음 · web/WAS/DB 상태), 예전 ①–⑭ 는 21칸 아래로.
+#   CloudFront(us-east-1) − 공개 ALB(서울) 빼기는 리전이 달라 대시보드 계산이 안 된다 → 두 숫자·그래프를 나란히 두고 세로축을 같게.
 resource "aws_cloudwatch_dashboard" "loadtest" {
   dashboard_name = "petclinic-loadtest"
   dashboard_body = file("${path.module}/cloudwatch/dashboard-petclinic-loadtest.json")
 }
 
-# 대시보드 — 2026-09-24 18:38 KST 마지막 저장(콘솔, 만든 사람은 CloudTrail 조회로 안 나옴). CloudFront 지표 위젯 1개.
-resource "aws_cloudwatch_dashboard" "traffic" {
-  dashboard_name = "PetClinic-Traffic-Dashboard"
+# 대시보드 — CloudFront 지표 위젯 1개. 2026-09-24 18:38 KST 마지막 저장(콘솔) 때 이름은 PetClinic-Traffic-Dashboard.
+# 2026-09-27 21:49~21:50 KST yena 가 이름만 바꿈(PetClinic-Traffic-WAF-Dashboard 를 거쳐 -CF-, 옛 이름은 삭제). 내용은 그대로.
+resource "aws_cloudwatch_dashboard" "traffic_cf" {
+  dashboard_name = "PetClinic-Traffic-CF-Dashboard"
 
   dashboard_body = jsonencode({
     widgets = [{

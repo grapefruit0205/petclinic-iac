@@ -1,4 +1,4 @@
-# 컴퓨트 계층 — 골든 AMI 5개(web · was test·v2·v4·v5), 시작 템플릿 2개, ASG 2개 + 스케일링 정책, 단독 인스턴스 5대, WAS 데이터 볼륨.
+# 컴퓨트 계층 — 골든 AMI 6개(web · was test·v2·v4·v5·v6), 시작 템플릿 2개, ASG 2개 + 스케일링 정책, 단독 인스턴스 4대, WAS 데이터 볼륨.
 # 키페어 `test-key` 는 퍼블릭 키를 API 로 못 읽어 import 할 수 없다 → 이름만 문자열로 쓴다.
 
 # web-ami 인스턴스(i-0c205c2e12ea8e389)에서 CreateImage 로 만든 골든 이미지. ASG 시작 템플릿 전 버전이 쓴다.
@@ -50,15 +50,18 @@ resource "aws_ami" "web_apache" {
 #   버전 설명 "v13: 1024 event MPM workers started at boot (16x64) - ELB 502 at minute :00".
 # v14 (2026-09-24 19:59 KST, yena 콘솔): v13 과 user data·나머지 동일, 인스턴스 프로파일만 CloudWatchAgentServerPolicy → web-iam
 #   (새 역할, 권한은 같은 CloudWatch Agent 정책 하나 — iam.tf). 버전 설명 없음. 기본 버전·ASG 는 아직 13 이라 떠 있는 web 은 v13.
+# v15 (2026-09-28 초안, 발표 뒤 적용): v14 + Apache 스레드 사용률 지표(상태 페이지 127.0.0.1:81 + web-thread-metric 서비스) — userdata/web-v15.sh.
+#   아래 web_threads_out · web_threads_in 정책(monitoring.tf 의 스레드 알람)이 ApacheBusyThreadsMax 로 늘리고 줄인다. apply 뒤 인스턴스 리프레시로 교체해야 반영된다.
+#   2026-09-28 19:0x apply · 리프레시 4459e0ca 완료(19:02–19:07).
 resource "aws_launch_template" "web" {
   name            = "web"
-  default_version = 13
+  default_version = 15
 
   image_id      = aws_ami.web_apache.id
   instance_type = "t3.small"
   key_name      = "test-key"
   # 스크립트의 __CF_SECRET__ 자리에 terraform.tfvars 의 값을 넣는다 → 실물 user data 와 글자까지 같다.
-  user_data = base64encode(replace(file("${path.module}/userdata/web-v13.sh"), "__CF_SECRET__", var.cf_origin_secret))
+  user_data = base64encode(replace(file("${path.module}/userdata/web-v15.sh"), "__CF_SECRET__", var.cf_origin_secret))
 
   block_device_mappings {
     device_name = "/dev/xvda"
@@ -101,7 +104,7 @@ resource "aws_launch_template" "web" {
 resource "aws_autoscaling_group" "web" {
   name                = "web-test"
   min_size            = 2
-  max_size            = 4
+  max_size            = 4 # 2026-09-28 kdt5: 6 으로 올리는 초안(스레드 기준 확장과 같이)은 보류 — 일단 4 유지
   desired_capacity    = 2
   vpc_zone_identifier = [aws_subnet.private1_2a.id, aws_subnet.private2_2c.id]
   target_group_arns   = [aws_lb_target_group.web.arn]
@@ -112,7 +115,7 @@ resource "aws_autoscaling_group" "web" {
 
   launch_template {
     id      = aws_launch_template.web.id
-    version = "13" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (9/22 6→7 리프레시 482197d8, 9/23 8→9 49278dd3, 9→10 5e20dfdb, 9/24 10→11 a3ddf313, 11→12 154ff1bb, 12→13 fa39dcce)
+    version = "15" # $Latest 가 아니라 버전 고정. 바꾸면 인스턴스 리프레시로 교체해야 반영된다 (9/22 6→7 리프레시 482197d8, 9/23 8→9 49278dd3, 9→10 5e20dfdb, 9/24 10→11 a3ddf313, 11→12 154ff1bb, 12→13 fa39dcce, 13→15 = 발표 뒤)
   }
 
   # 그룹 지표 전부 켜져 있음
@@ -146,43 +149,49 @@ resource "aws_autoscaling_group" "web" {
   }
 }
 
-# CPU 60% 목표 추적. 알람 2개(TargetTracking-web-test-AlarmHigh/Low)는 이 정책이 만들고 소유한다.
-resource "aws_autoscaling_policy" "web_cpu" {
-  name                      = "Target Tracking Policy"
-  autoscaling_group_name    = aws_autoscaling_group.web.name
-  policy_type               = "TargetTrackingScaling"
-  estimated_instance_warmup = 60
+# (2026-09-30) CPU 60% 목표 추적 정책("Target Tracking Policy", 늘리기만) 삭제 — web CPU 는 몰려도 7~15% 라 울린 적이 없고,
+#   web 을 늘리고 줄이는 기준은 아래 스레드 최대 개수 하나로 둔다. 정책을 지우면 AWS 가 알람 TargetTracking-web-test-AlarmHigh 도 지운다.
 
-  target_tracking_configuration {
-    target_value     = 60
-    disable_scale_in = false
-
-    predefined_metric_specification {
-      predefined_metric_type = "ASGAverageCPUUtilization"
-    }
-  }
-}
-
-# 2026-09-21 콘솔 추가: Public ALB 타깃당 요청수 기반 단계 스케일 아웃. 트리거 알람은 monitoring.tf 의 web_reqcount_high.
-# 단계 = 알람 임계치(20000) 기준 초과분 0~15000 → +1대, 15000 이상 → +2대. 이름의 "cale-out" 은 콘솔에서 입력한 오타 그대로.
-# 스케일 인 정책은 없다 — 줄이는 건 CPU 목표 추적(web_cpu)이 맡는다.
-resource "aws_autoscaling_policy" "web_reqcount" {
-  name                      = "cale-out-web-reqcount-20000~35000"
+# web 을 늘리고 줄이는 기준 = Apache 작업 스레드 "최대" 개수(시작 템플릿 v15 가 보내는 PetClinic/WEB ApacheBusyThreadsMax,
+# web 1대가 1분 동안 10초마다 잰 BusyWorkers 중 가장 큰 값 · 차원 AutoScalingGroupName 하나 → 통계 Maximum = 가장 바쁜 web 1대).
+# 요청 수 단계 정책(옛 web_reqcount, "cale-out-web-reqcount-20000~35000")을 대신한다. 근거는 userdata/web-v15.sh 머리 주석 —
+#   요청이 많아도 뒤가 빠르면 스레드를 거의 안 쓰고, 뒤(DB 복제본)가 느려질 때만 오른다.
+# 2026-09-28 19:0x 처음엔 평균 %(ApacheBusyThreadsPct) 목표 추적 50% 로 apply → 같은 날 19:09 S5 에서 web 이 한 번도 안 늘었다:
+#   스레드는 몇 초씩 몰렸다 빠져서(가장 바쁜 1대 19:15 437 · 19:18 865 · 19:20 1,007개 / 1,024) 1분 평균은 7 · 20 · 48% 로 뭉개졌고,
+#   목표 추적은 "3분 연속 초과"(바꿀 수 없음)라 19:21 평균 96.7% 로 다 찼을 때도 부하가 먼저 끝났다 — 에러 1만 2천여 건(0.69%).
+# → 알람 + 단계 정책으로 바꿈. 늘리기: 가장 바쁜 web 이 1분이라도 512개(50%) 이상. 줄이기: 15분 내내 128개(12.5%) 미만.
+#   부하 중엔 튀는 값이 계속 128 을 넘으므로 줄이기가 끼어들지 않는다(9/27 S5 의 늘리기 · 줄이기 줄다리기 502 151건 방지).
+#   Auto Scaling 동작이 붙은 알람은 ALARM 인 동안 1분마다 정책을 다시 부른다 — 새 web 은 준비(warmup) 180초 동안 대수에 이미 셈해져 과하게 늘지 않는다.
+resource "aws_autoscaling_policy" "web_threads_out" {
+  name                      = "web-apache-threads-max-out"
   autoscaling_group_name    = aws_autoscaling_group.web.name
   policy_type               = "StepScaling"
   adjustment_type           = "ChangeInCapacity"
-  metric_aggregation_type   = "Average"
-  estimated_instance_warmup = 300  # 2026-09-22 명시 (없으면 ASG 쿨다운 값에 묶임)
-  enabled                   = true # 2026-09-24 01:23 S5 준비 중 콘솔에서 끔 → 9/24 다시 켬. 끄면 요청 수로는 web 이 늘지 않는다
+  metric_aggregation_type   = "Maximum"
+  estimated_instance_warmup = 180 # 부팅 때 dnf 설치(에이전트·rsyslog) 뒤 지표가 나오기까지 — health_check_grace_period 120 보다 넉넉히
 
+  # 경계는 알람 기준 512 를 0 으로 본 차이: 512–819개 → +1, 820개(80%) 이상 → +2
   step_adjustment {
     metric_interval_lower_bound = 0
-    metric_interval_upper_bound = 15000
+    metric_interval_upper_bound = 308
     scaling_adjustment          = 1
   }
   step_adjustment {
-    metric_interval_lower_bound = 15000
+    metric_interval_lower_bound = 308
     scaling_adjustment          = 2
+  }
+}
+
+resource "aws_autoscaling_policy" "web_threads_in" {
+  name                    = "web-apache-threads-max-in"
+  autoscaling_group_name  = aws_autoscaling_group.web.name
+  policy_type             = "StepScaling"
+  adjustment_type         = "ChangeInCapacity"
+  metric_aggregation_type = "Maximum"
+
+  step_adjustment {
+    metric_interval_upper_bound = 0
+    scaling_adjustment          = -1
   }
 }
 
@@ -305,7 +314,7 @@ resource "aws_ami" "was_golden_v2" {
   }
 }
 
-# 시작 템플릿 was-lt. 실물은 latest=7 · default=5, ASG 는 $Latest(= v7). 이 블록은 latest(v7) 의 내용 — provider 는 최신 버전을 읽는다.
+# 시작 템플릿 was-lt. 실물은 latest=8 · default=5, ASG 는 버전 7 고정. 이 블록은 latest(v8) 의 내용 — provider 는 최신 버전을 읽는다.
 # v1 (17:20 KST): AMI was-goldenImage-test, 루트도 KMS 암호화, 설명 "was 웹서버 시작 템플릿".
 # v2 (18:42 KST, semin): AMI was-goldenImage-test-v2 로 교체, 루트 비암호화, /dev/sdf 처리량 미지정, 설명 없음. user data 는 v1 과 동일.
 # v3·v4 (2026-09-22 19:15·19:25 KST, semin): AMI was-goldenImage-v4(에이전트 설치됨) + user data 끝에 CloudWatch Agent 기동
@@ -316,12 +325,15 @@ resource "aws_ami" "was_golden_v2" {
 #   15:27~15:31 WAS 2대 교체 → 10.0.21.37 · 10.0.20.190. user data 는 v4~v6 모두 같다.
 # v7 (2026-09-27 03:49 KST, semin): v6 + AMI was-goldenImage-v6. user data 는 그대로. 기본 버전은 5 그대로.
 #   01:46 ASG 를 0대로 내렸다가 03:49 2대로 되돌림 → i-04be34630a6d5a368 · i-0648caed79a4a49e7 (v7).
+# v8 (2026-09-28 17:43 KST, yena): AMI 를 was-goldenImage-v4 로 되돌리고 루트(/dev/xvda) 매핑을 KMS 암호화로 명시(스냅샷 = v4 AMI 의 것).
+#   user data 는 v7 과 같다. 이 버전으로 뜬 새 WAS 가 연속으로 상태 확인에 실패 → kdt5 가 ASG 를 버전 7 로 고정(아래 ASG).
+#   그래서 v8 은 실제로 쓰이지 않는다. 이 블록을 apply 하면 v9 가 새로 생길 뿐 ASG 는 7 그대로.
 # t3.medium, 프로파일 was-test-iam (시크릿 읽기 · SSM Core · CloudWatch Agent — iam.tf).
 resource "aws_launch_template" "was" {
   name            = "was-lt"
   default_version = 5
 
-  image_id      = aws_ami.was_golden_v6.id
+  image_id      = aws_ami.was_golden_v4.id # v8. ASG 가 쓰는 v7 은 was_golden_v6
   instance_type = "t3.medium"
   key_name      = "test-key"
   user_data     = base64encode(file("${path.module}/userdata/was-lt.sh"))
@@ -340,6 +352,21 @@ resource "aws_launch_template" "was" {
     security_groups = [aws_security_group.was.id]
   }
 
+  # v8: 루트도 KMS 암호화로 명시
+  block_device_mappings {
+    device_name = "/dev/xvda"
+    ebs {
+      snapshot_id           = "snap-00b515e624b9e2f57" # was-goldenImage-v4 의 루트 스냅샷
+      volume_size           = 20
+      volume_type           = "gp3"
+      iops                  = 3000
+      throughput            = 125
+      delete_on_termination = true
+      encrypted             = true
+      kms_key_id            = "arn:aws:kms:ap-northeast-2:723165663216:key/fffaccce-417f-4d19-a593-dfd6214a8eb8"
+    }
+  }
+
   block_device_mappings {
     device_name = "/dev/sdf"
     ebs {
@@ -355,16 +382,21 @@ resource "aws_launch_template" "was" {
   # 콘솔은 KMS 키를 ARN 이 아니라 키 ID("fffaccce-…")로 저장했다. provider 는 ARN 만 받으므로 코드엔 ARN 을 쓰고,
   # 그 표기 차이가 plan 에 "변경" 으로 잡히지 않게 무시한다 (같은 키).
   lifecycle {
-    ignore_changes = [block_device_mappings[0].ebs[0].kms_key_id]
+    ignore_changes = [
+      block_device_mappings[0].ebs[0].kms_key_id,
+      block_device_mappings[1].ebs[0].kms_key_id,
+    ]
   }
 }
 
-# WAS ASG. WAS 서브넷(private3/4) 2~4대, tg-internal-alb 에 등록. 시작 템플릿은 $Latest 를 따라간다(2026-09-21 18:43 KST
-# $Default → $Latest, semin; web-test 는 버전 고정). 18:46~18:52 KST 2대가 v2 로 교체됨. 그룹 지표(enabled_metrics)는 안 켜져 있다. 유예 300초.
+# WAS ASG. WAS 서브넷(private3/4) 2~6대(2026-09-28 21시 kdt5 결정, 전에는 2~4), tg-internal-alb 에 등록. 유예 300초.
+# 시작 템플릿: 2026-09-21 18:43 KST $Default → $Latest(semin) 였다가, 9/28 v8(yena, AMI was-goldenImage-v4)로 새 WAS 가
+# 연속 실패 → kdt5 가 콘솔에서 버전 7 로 고정. 코드도 7 로 맞춤($Latest 로 두면 apply 때 v8 로 되돌아간다).
+# 그룹 지표: 2026-09-28 전에는 꺼져 있어 대시보드 ⑦·⑫ 의 WAS 대수 선이 비어 있었다 → web 과 같이 전부 켬(무료, 1분). 켠 뒤부터만 쌓인다.
 resource "aws_autoscaling_group" "was" {
   name                = "was-asg"
   min_size            = 2
-  max_size            = 4
+  max_size            = 6 # 2026-09-28 21시 kdt5: 4 → 6 (web 은 4 그대로)
   desired_capacity    = 2
   vpc_zone_identifier = [aws_subnet.private4_2c.id, aws_subnet.private3_2a.id]
   target_group_arns   = [aws_lb_target_group.was.arn]
@@ -375,8 +407,20 @@ resource "aws_autoscaling_group" "was" {
 
   launch_template {
     id      = aws_launch_template.was.id
-    version = "$Latest"
+    version = "7" # 콘솔 고정값(위 주석)
   }
+
+  metrics_granularity = "1Minute"
+  enabled_metrics = [
+    "GroupAndWarmPoolDesiredCapacity", "GroupAndWarmPoolTotalCapacity", "GroupDesiredCapacity",
+    "GroupInServiceCapacity", "GroupInServiceInstances", "GroupMaxSize", "GroupMinSize",
+    "GroupPendingCapacity", "GroupPendingInstances", "GroupStandbyCapacity", "GroupStandbyInstances",
+    "GroupTerminatingCapacity", "GroupTerminatingInstances", "GroupTerminatingRetainedCapacity",
+    "GroupTerminatingRetainedInstances", "GroupTotalCapacity", "GroupTotalInstances",
+    "WarmPoolDesiredCapacity", "WarmPoolMinSize", "WarmPoolPendingCapacity",
+    "WarmPoolPendingRetainedCapacity", "WarmPoolTerminatingCapacity",
+    "WarmPoolTerminatingRetainedCapacity", "WarmPoolTotalCapacity", "WarmPoolWarmedCapacity",
+  ]
 
   tag {
     key                 = "Name"
@@ -393,6 +437,8 @@ resource "aws_autoscaling_group" "was" {
 # CPU 목표 추적. 9/26 s5-3300 실측(5분 최대 54.7%) 후 60 → 50. 알람 TargetTracking-was-asg-AlarmHigh/Low 는 이 정책이 소유.
 # 주의(9/26 결론): WAS 는 DB 응답 대기가 대부분이라 CPU 가 낮게 머문다 — 기준을 내려도 병목(DB CPU) 해소와는 무관하고,
 # 부하 중 증설 장면은 "늘려도 처리량 그대로(병목 DB 입증)" 자료로 기록할 것.
+# AlarmLow(CPU 35% 미만 15분)는 알림이 아니라 "줄이기" 신호 — Slack 으로 가지 않고, 한가할 때 늘 경보 상태인 게 정상이다
+# (9/28 11:56 WAS 2→3 을 12:11 에 3→2 로 되돌린 것이 이 알람). 없애려면 disable_scale_in = true — 그러면 WAS 도 web 처럼 손으로 줄여야 한다.
 resource "aws_autoscaling_policy" "was_cpu" {
   name                      = "Target Tracking Policy"
   autoscaling_group_name    = aws_autoscaling_group.was.name
@@ -409,33 +455,7 @@ resource "aws_autoscaling_policy" "was_cpu" {
   }
 }
 
-# --- 단독 인스턴스 5대 ---
-# 옛 WAS(수제). Tomcat 8080. 2026-09-21 WAS ASG(was-asg) 로 대체되며 tg-internal-alb 에서 등록 해제, 2026-09-22 13:27 KST semin 이 **중지**
-# (실험용 보관, 프라이빗 서브넷이라 퍼블릭 IP 해제 문제 없음). 종료하면 이 블록 + was_data 볼륨·연결 블록 삭제 + state rm.
-resource "aws_instance" "was_test_a" {
-  ami                         = "ami-0fad23d064f9e8330"
-  instance_type               = "t3.medium"
-  subnet_id                   = aws_subnet.private3_2a.id
-  private_ip                  = "10.0.20.235"
-  associate_public_ip_address = false
-  vpc_security_group_ids      = [aws_security_group.was.id]
-  key_name                    = "test-key"
-  iam_instance_profile        = aws_iam_instance_profile.was.name
-  monitoring                  = false
-
-  root_block_device {
-    volume_size           = 20
-    volume_type           = "gp3"
-    delete_on_termination = true
-    encrypted             = false
-  }
-  # 추가 데이터 볼륨(/dev/sdf, 암호화)은 aws_ebs_volume.was_data + aws_volume_attachment.was_data 로 관리
-
-  tags = {
-    Name = "WAS-test-a"
-  }
-}
-
+# --- 단독 인스턴스 4대 (WAS-test-a 는 2026-09-28 종료) ---
 # ASG 밖의 수제 web 1대. 2026-09-19 21:45 KST Targetgroup-web 에서 등록 해제(헤더 검사 없는 v5 설정이라 우회 경로였음)
 # → 트래픽 안 받음. WEB 계층 실험용으로 남기고 mc-ec2-role 을 붙여 SSM 접속 가능하게 함. 22:21 KST 중지(비용) — 필요할 때 시작.
 resource "aws_instance" "web_test_a" {
@@ -552,17 +572,13 @@ resource "aws_instance" "was_gg2" {
   }
 }
 
-# WAS 데이터 볼륨 — WAS-test-a 의 /dev/sdf (KMS 고객 키 암호화). ASG 인스턴스는 시작 템플릿의 두 번째 BDM 이 같은 키로 따로 만든다.
+# WAS 데이터 볼륨 — 옛 WAS-test-a 의 /dev/sdf (KMS 고객 키 암호화). ASG 인스턴스는 시작 템플릿의 /dev/sdf 매핑이 같은 키로 따로 만든다.
+# 2026-09-28 15:27 KST semin 이 WAS-test-a(i-0d7f99e2758122059)를 종료 → 인스턴스 · 연결(aws_volume_attachment) 블록은 뺐다.
+#   이 볼륨은 종료 때 지워지지 않고 남아 있다(available, 연결 없음) — 지울지는 WAS 담당 결정.
 resource "aws_ebs_volume" "was_data" {
   availability_zone = "ap-northeast-2a"
   size              = 20
   type              = "gp3"
   encrypted         = true
   kms_key_id        = "arn:aws:kms:ap-northeast-2:723165663216:key/fffaccce-417f-4d19-a593-dfd6214a8eb8"
-}
-
-resource "aws_volume_attachment" "was_data" {
-  device_name = "/dev/sdf"
-  volume_id   = aws_ebs_volume.was_data.id
-  instance_id = aws_instance.was_test_a.id
 }

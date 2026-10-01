@@ -1,4 +1,4 @@
-# 보안 그룹 6개 — 규칙은 인라인 블록 (import 시 provider 가 읽어 오는 형태 그대로).
+# 보안 그룹 7개 — 규칙은 인라인 블록 (import 시 provider 가 읽어 오는 형태 그대로).
 # 규칙 묶음(블록) 단위는 실물의 IpPermissions 그룹과 1:1 이어야 plan 이 0 이다.
 # `default` SG 는 VPC 기본이라 관리 대상에서 뺐다 (data.tf 에서 조회만).
 
@@ -170,11 +170,42 @@ resource "aws_security_group" "db" {
     protocol        = "tcp"
     security_groups = [aws_security_group.bastion.id]
   }
+  # 2026-09-28 20:25 KST semin: 비밀번호 자동 교체 Lambda → 3306 (secret-rotation.tf).
+  ingress {
+    description     = "lambda-secret-rotation-sg"
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = [aws_security_group.lambda_secret_rotation.id]
+  }
 
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# 비밀번호 자동 교체 Lambda(SecretsManagerlambda-rds-password-change, secret-rotation.tf)용. 2026-09-28 20:24 KST semin 콘솔 생성.
+# 나가는 길만 둘: DB 3306(새 비밀번호로 ALTER USER) · 443(NAT 를 거쳐 Secrets Manager API). 들어오는 규칙은 없다.
+# DB SG 가 이 SG 를 참조하므로, 여기서는 순환 참조를 피하려고 DB SG 를 ID 로 적는다(= aws_security_group.db).
+resource "aws_security_group" "lambda_secret_rotation" {
+  name        = "lambda-secret-rotation-sg"
+  description = "Allow secret-rotation"
+  vpc_id      = aws_vpc.main.id
+
+  egress {
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = ["sg-03fe8db85b8ac20a6"] # petclinic-db-sg
+  }
+  egress {
+    description = "HTTPS-to-Secrets-Manager-via-NAT"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }

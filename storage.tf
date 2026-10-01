@@ -136,6 +136,13 @@ resource "aws_cloudwatch_log_group" "rds_error_replica" {
   log_group_class   = "STANDARD"
 }
 
+# 복제본 느린 쿼리 로그 — 2026-09-28 14:45 KST RDS 가 만듦(복제본에 slowquery 내보내기를 켠 때).
+resource "aws_cloudwatch_log_group" "rds_slowquery_replica" {
+  name              = "/aws/rds/instance/db-readonly/slowquery"
+  retention_in_days = 0
+  log_group_class   = "STANDARD"
+}
+
 # 감사 로그 → Firehose RDS-Audit-PUT-S3 → 전용 버킷. 2026-09-24 23:44 KST jaewoon 콘솔 생성 (역할 iam.tf logs_to_firehose).
 # ⚠️ 2026-09-25 00:56 RDS 의 audit 로그 내보내기를 꺼서(database.tf) 지금은 이 그룹에 새 로그가 안 들어온다 → 파이프라인은 대기 상태.
 resource "aws_cloudwatch_log_subscription_filter" "rds_audit" {

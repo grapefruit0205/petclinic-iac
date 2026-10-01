@@ -193,14 +193,6 @@ import {
   id = "web-test"
 }
 import {
-  to = aws_autoscaling_policy.web_cpu
-  id = "web-test/Target Tracking Policy"
-}
-import {
-  to = aws_instance.was_test_a
-  id = "i-0d7f99e2758122059"
-}
-import {
   to = aws_instance.web_test_a
   id = "i-02084ca917c81d58f"
 }
@@ -215,10 +207,6 @@ import {
 import {
   to = aws_ebs_volume.was_data
   id = "vol-07d20b27fb02490f6"
-}
-import {
-  to = aws_volume_attachment.was_data
-  id = "/dev/sdf:vol-07d20b27fb02490f6:i-0d7f99e2758122059"
 }
 
 # --- IAM ---
@@ -366,14 +354,6 @@ import {
 import {
   to = aws_autoscaling_policy.was_cpu
   id = "was-asg/Target Tracking Policy"
-}
-import {
-  to = aws_autoscaling_policy.web_reqcount
-  id = "web-test/cale-out-web-reqcount-20000~35000"
-}
-import {
-  to = aws_cloudwatch_metric_alarm.web_reqcount_high
-  id = "alarm-web-reqcount-high-20000"
 }
 import {
   to = aws_sns_topic.alerts
@@ -598,8 +578,8 @@ import {
   id = "arn:aws:cloudtrail:ap-northeast-2:723165663216:trail/cloud-logs-all"
 }
 import {
-  to = aws_cloudwatch_dashboard.traffic
-  id = "PetClinic-Traffic-Dashboard"
+  to = aws_cloudwatch_dashboard.traffic_cf
+  id = "PetClinic-Traffic-CF-Dashboard" # 2026-09-27 이름 변경 — 옛 PetClinic-Traffic-Dashboard(aws_cloudwatch_dashboard.traffic)는 삭제됨
 }
 
 # --- RDS 감사 로그 파이프라인 (2026-09-24 jaewoon 콘솔: Firehose · 전용 버킷 · 역할) ---
@@ -728,4 +708,62 @@ import {
 import {
   to = aws_ami.was_golden_v6
   id = "ami-0eac111a62f8b8c94"
+}
+
+# --- 2026-10-01 동기화: 9/27~9/28 콘솔 변경 (대시보드 이름 · 복제본 slowquery 로그 · 비밀번호 교체 SG · 교체 뒤 WAS 재시작) ---
+import {
+  to = aws_cloudwatch_log_group.rds_slowquery_replica
+  id = "/aws/rds/instance/db-readonly/slowquery"
+}
+import {
+  to = aws_security_group.lambda_secret_rotation
+  id = "sg-0f514eae58505a6ed"
+}
+import {
+  to = aws_cloudwatch_log_group.lambda_rds_password_change
+  id = "/aws/lambda/SecretsManagerlambda-rds-password-change"
+}
+import {
+  to = aws_iam_role.rds_pwch
+  id = "rds-pwch-role"
+}
+import {
+  to = aws_iam_role_policy.rds_pwch
+  id = "rds-pwch-role:rds-pwch-rolePolicy"
+}
+import {
+  to = aws_ssm_document.petclinic_restart_after_secret_rotation
+  id = "PetclinicRestartAfterSecretRotation"
+}
+import {
+  to = aws_iam_role.secret_refresh_lambda
+  id = "PetclinicSecretRefreshLambdaRole"
+}
+import {
+  to = aws_iam_role_policy_attachment.secret_refresh_lambda_basic
+  id = "PetclinicSecretRefreshLambdaRole/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+import {
+  to = aws_iam_role_policy.secret_refresh_lambda
+  id = "PetclinicSecretRefreshLambdaRole:PetclinicWASRefresh"
+}
+import {
+  to = aws_cloudwatch_log_group.secret_refresh_lambda
+  id = "/aws/lambda/PetclinicTomcatSecretRefresh"
+}
+import {
+  to = aws_lambda_function.secret_refresh
+  id = "PetclinicTomcatSecretRefresh"
+}
+import {
+  to = aws_cloudwatch_event_rule.secret_current_restart_was
+  id = "petclinic-secret-current-restart-was"
+}
+import {
+  to = aws_cloudwatch_event_target.secret_current_restart_was
+  id = "petclinic-secret-current-restart-was/restart-was"
+}
+import {
+  to = aws_lambda_permission.secret_refresh_events
+  id = "PetclinicTomcatSecretRefresh/AllowSecretsRotationEvent"
 }
